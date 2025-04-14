@@ -26,6 +26,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Colors.brown.shade900,
+        automaticallyImplyLeading: false,
         title: Text(
           widget.roomTitle,
           style: const TextStyle(color: Colors.white),
