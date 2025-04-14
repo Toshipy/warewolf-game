@@ -1,4 +1,6 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:werewolf_game/screens/room_service.dart';
 
 class RoomListScreen extends StatefulWidget {
   const RoomListScreen({super.key});
@@ -8,6 +10,8 @@ class RoomListScreen extends StatefulWidget {
 }
 
 class _RoomListScreenState extends State<RoomListScreen> {
+  final RoomService _roomService = RoomService();
+
   // ルームリストのデータ
   final List<Map<String, dynamic>> _rooms = [
     {
@@ -79,6 +83,11 @@ class _RoomListScreenState extends State<RoomListScreen> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
+                    GestureDetector(
+                      onTap: () {
+                        _showCreateRoomDialog(context);
+                      },
+                    ),
                     // 部屋を作るボタン
                     Container(
                       width: 250,
@@ -241,4 +250,101 @@ class _RoomListScreenState extends State<RoomListScreen> {
       ),
     );
   }
+}
+
+void _showCreateRoomDialog(BuildContext context) {
+  int maxPlayers = 9;
+  List<String> roles = ['市民', '市民', '占い師', '霊能者', '狩人', '人狼', '人狼', '狂信者'];
+  final titleController = TextEditingController(text: '新しい部屋');
+  final _roomService = RoomService();
+
+  showDialog(
+    context: context,
+    builder: (BuildContext context) {
+      return AlertDialog(
+        title: Text('部屋を作る'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: titleController,
+                decoration: InputDecoration(
+                  labelText: '部屋のタイトル',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 20),
+
+              // 最大人数選択
+              DropdownButtonFormField<int>(
+                decoration: InputDecoration(
+                  labelText: '最大人数',
+                  border: OutlineInputBorder(),
+                ),
+                value: maxPlayers,
+                items:
+                    [4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+                        .map(
+                          (number) => DropdownMenuItem<int>(
+                            value: number,
+                            child: Text(number.toString() + '人'),
+                          ),
+                        )
+                        .toList(),
+                onChanged: (value) {
+                  if (value != null) {
+                    maxPlayers = value;
+                  }
+                },
+              ),
+              const SizedBox(height: 20),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+            },
+            child: Text('キャンセル'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              try {
+                // Loading
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(const SnackBar(content: Text('部屋を作成中...')));
+
+                // Firestoreに部屋を作成
+                DocumentReference roomRef = await _roomService.createRoom(
+                  title: titleController.text.trim(),
+                  maxPlayers: maxPlayers,
+                  roles: roles,
+                );
+
+                if (context.mounted) {
+                  Navigator.of(context).pop();
+
+                  ScaffoldMessenger.of(
+                    context,
+                  ).showSnackBar(const SnackBar(content: Text('部屋を作成しました')));
+                  // ここにゲーム画面への遷移を追加（後ほど実装）
+                  print('作成した部屋ID: ${roomRef.id}');
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('エラー: ' + e.toString())),
+                  );
+                }
+              }
+            },
+            child: Text('作成する'),
+          ),
+        ],
+      );
+    },
+  );
 }
