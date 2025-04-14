@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:werewolf_game/screens/room_service.dart';
+import 'chat_room_screen.dart';
 
 class RoomListScreen extends StatefulWidget {
   const RoomListScreen({super.key});
@@ -269,95 +270,150 @@ void _showCreateRoomDialog(BuildContext context) {
   List<String> roles = ['市民', '市民', '占い師', '霊能者', '狩人', '人狼', '人狼', '狂信者'];
   final titleController = TextEditingController(text: '新しい部屋');
   final _roomService = RoomService();
-
+  bool isCreating = false;
   showDialog(
     context: context,
+    barrierDismissible: false,
     builder: (BuildContext context) {
-      return AlertDialog(
-        title: Text('部屋を作る'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: titleController,
-                decoration: InputDecoration(
-                  labelText: '部屋のタイトル',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 20),
+      return StatefulBuilder(
+        // StatefulBuilderを追加
+        builder: (context, setState) {
+          return AlertDialog(
+            title: Text('部屋を作る'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: titleController,
+                    decoration: InputDecoration(
+                      labelText: '部屋のタイトル',
+                      border: OutlineInputBorder(),
+                    ),
+                    enabled: !isCreating, // 作成中は入力を無効化
+                  ),
+                  const SizedBox(height: 20),
 
-              // 最大人数選択
-              DropdownButtonFormField<int>(
-                decoration: InputDecoration(
-                  labelText: '最大人数',
-                  border: OutlineInputBorder(),
-                ),
-                value: maxPlayers,
-                items:
-                    [4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
-                        .map(
-                          (number) => DropdownMenuItem<int>(
-                            value: number,
-                            child: Text(number.toString() + '人'),
+                  // 最大人数選択
+                  DropdownButtonFormField<int>(
+                    decoration: InputDecoration(
+                      labelText: '最大人数',
+                      border: OutlineInputBorder(),
+                    ),
+                    value: maxPlayers,
+                    items:
+                        [4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+                            .map(
+                              (number) => DropdownMenuItem<int>(
+                                value: number,
+                                child: Text(number.toString() + '人'),
+                              ),
+                            )
+                            .toList(),
+                    onChanged:
+                        isCreating
+                            ? null
+                            : (value) {
+                              // 作成中は変更を無効化
+                              if (value != null) {
+                                maxPlayers = value;
+                              }
+                            },
+                  ),
+                  const SizedBox(height: 20),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed:
+                    isCreating
+                        ? null
+                        : () {
+                          // 作成中は無効化
+                          Navigator.of(context).pop();
+                        },
+                child: Text('キャンセル'),
+              ),
+              ElevatedButton(
+                onPressed:
+                    isCreating
+                        ? null // 作成中は無効化
+                        : () async {
+                          setState(() {
+                            isCreating = true; // 作成開始
+                          });
+                          try {
+                            // Loading
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('部屋を作成中...')),
+                            );
+
+                            // Firestoreに部屋を作成
+                            DocumentReference roomRef = await _roomService
+                                .createRoom(
+                                  title: titleController.text.trim(),
+                                  maxPlayers: maxPlayers,
+                                  roles: roles,
+                                );
+
+                            if (context.mounted) {
+                              Navigator.of(context).pop();
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('部屋を作成しました')),
+                              );
+
+                              // チャットルーム画面に遷移
+                              if (context.mounted) {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder:
+                                        (context) => ChatRoomScreen(
+                                          roomId: roomRef.id,
+                                          roomTitle:
+                                              titleController.text.trim(),
+                                        ),
+                                  ),
+                                );
+                              }
+                            }
+                          } catch (e, stackTrace) {
+                            print('Error: $e');
+                            print('StackTrace: $stackTrace');
+                            if (context.mounted) {
+                              setState(() {
+                                isCreating = false; // エラー時は作成状態を解除
+                              });
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text('エラー: ${e.toString()}')),
+                              );
+                            }
+                          }
+                        },
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (isCreating) ...[
+                      SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            Colors.white,
                           ),
-                        )
-                        .toList(),
-                onChanged: (value) {
-                  if (value != null) {
-                    maxPlayers = value;
-                  }
-                },
+                        ),
+                      ),
+                      SizedBox(width: 8),
+                    ],
+                    Text(isCreating ? '作成中...' : '作成する'),
+                  ],
+                ),
               ),
-              const SizedBox(height: 20),
             ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-            },
-            child: Text('キャンセル'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              try {
-                // Loading
-                ScaffoldMessenger.of(
-                  context,
-                ).showSnackBar(const SnackBar(content: Text('部屋を作成中...')));
-
-                // Firestoreに部屋を作成
-                DocumentReference roomRef = await _roomService.createRoom(
-                  title: titleController.text.trim(),
-                  maxPlayers: maxPlayers,
-                  roles: roles,
-                );
-
-                if (context.mounted) {
-                  Navigator.of(context).pop();
-
-                  ScaffoldMessenger.of(
-                    context,
-                  ).showSnackBar(const SnackBar(content: Text('部屋を作成しました')));
-                  // ここにゲーム画面への遷移を追加（後ほど実装）
-                  print('作成した部屋ID: ${roomRef.id}');
-                }
-              } catch (e, stackTrace) {
-                print('Error: $e');
-                print('StackTrace: $stackTrace');
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('エラー: ${e.toString()}')),
-                  );
-                }
-              }
-            },
-            child: Text('作成する'),
-          ),
-        ],
+          );
+        },
       );
     },
   );
