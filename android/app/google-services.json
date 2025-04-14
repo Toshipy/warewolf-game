@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "965768700070",
+    "project_id": "werewolf-game-d6482",
+    "storage_bucket": "werewolf-game-d6482.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:965768700070:android:f00793f54fa367f4f35467",
+        "android_client_info": {
+          "package_name": "com.example.werewolf_game"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDg3OPCq9k1eCF5hSFaHZ6HTNB_TikPH7o"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
