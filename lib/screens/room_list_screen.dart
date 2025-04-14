@@ -12,6 +12,16 @@ class RoomListScreen extends StatefulWidget {
 class _RoomListScreenState extends State<RoomListScreen> {
   final RoomService _roomService = RoomService();
 
+  @override
+  void initState() {
+    super.initState();
+    _testFirebaseConnection();
+  }
+
+  Future<void> _testFirebaseConnection() async {
+    await _roomService.testConnection();
+  }
+
   // ルームリストのデータ
   final List<Map<String, dynamic>> _rooms = [
     {
@@ -87,37 +97,39 @@ class _RoomListScreenState extends State<RoomListScreen> {
                       onTap: () {
                         _showCreateRoomDialog(context);
                       },
-                    ),
-                    // 部屋を作るボタン
-                    Container(
-                      width: 250,
-                      height: 50,
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [Colors.blue.shade900, Colors.blue.shade900],
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                        ),
-                        borderRadius: BorderRadius.circular(15),
-                        border: Border.all(
-                          color: Colors.amber.shade900,
-                          width: 2,
-                        ),
-                      ),
-                      child: Center(
-                        child: Text(
-                          '部屋を作る',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            shadows: [
-                              Shadow(
-                                offset: Offset(1, 1),
-                                color: Colors.black,
-                                blurRadius: 2,
-                              ),
+                      child: Container(
+                        width: 250,
+                        height: 50,
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [
+                              Colors.blue.shade900,
+                              Colors.blue.shade900,
                             ],
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                          ),
+                          borderRadius: BorderRadius.circular(15),
+                          border: Border.all(
+                            color: Colors.amber.shade900,
+                            width: 2,
+                          ),
+                        ),
+                        child: Center(
+                          child: Text(
+                            '部屋を作る',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              shadows: [
+                                Shadow(
+                                  offset: Offset(1, 1),
+                                  color: Colors.black,
+                                  blurRadius: 2,
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       ),
@@ -333,10 +345,12 @@ void _showCreateRoomDialog(BuildContext context) {
                   // ここにゲーム画面への遷移を追加（後ほど実装）
                   print('作成した部屋ID: ${roomRef.id}');
                 }
-              } catch (e) {
+              } catch (e, stackTrace) {
+                print('Error: $e');
+                print('StackTrace: $stackTrace');
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('エラー: ' + e.toString())),
+                    SnackBar(content: Text('エラー: ${e.toString()}')),
                   );
                 }
               }
