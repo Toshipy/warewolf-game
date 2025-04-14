@@ -12,50 +12,40 @@ class RoomListScreen extends StatefulWidget {
 
 class _RoomListScreenState extends State<RoomListScreen> {
   final RoomService _roomService = RoomService();
+  bool _isLoading = true;
+  String? _errorMessage;
+  List<Map<String, dynamic>> _rooms = [];
 
   @override
   void initState() {
     super.initState();
     _testFirebaseConnection();
+    _loadRooms();
   }
 
   Future<void> _testFirebaseConnection() async {
     await _roomService.testConnection();
   }
 
-  // ルームリストのデータ
-  final List<Map<String, dynamic>> _rooms = [
-    {
-      'ruleMatching': 78,
-      'playerCount': '6/13',
-      'likeCount': 1386,
-      'playerRecruitment': '誰でも歓迎',
-      'languageLevel': '一般',
-      'roles': ['市民', '市民', '占い師', '霊能者', '狩人', '人狼', '人狼', '狂信者'],
-    },
-    {
-      'ruleMatching': 73,
-      'playerCount': '3/13',
-      'likeCount': 2248,
-      'playerRecruitment': '誰でも歓迎',
-      'languageLevel': '目上相手',
-      'roles': [
-        '市民',
-        '市民',
-        '占い師',
-        '霊能者',
-        '狩人',
-        '猫又',
-        'パン屋',
-        '呪われし者',
-        '人狼',
-        '人狼',
-        '狂信者',
-        '黒猫',
-        '純愛者',
-      ],
-    },
-  ];
+  Future<void> _loadRooms() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final rooms = await _roomService.getRooms();
+      setState(() {
+        _rooms = rooms;
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'ルーム情報の取得に失敗しました: ${e.toString()}';
+        _isLoading = false;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -137,29 +127,34 @@ class _RoomListScreenState extends State<RoomListScreen> {
                     ),
 
                     // 更新ボタン
-                    Container(
-                      width: 60,
-                      height: 50,
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [
-                            Colors.green.shade800,
-                            Colors.green.shade600,
-                          ],
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
+                    GestureDetector(
+                      onTap: () {
+                        _loadRooms();
+                      },
+                      child: Container(
+                        width: 60,
+                        height: 50,
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [
+                              Colors.green.shade800,
+                              Colors.green.shade600,
+                            ],
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                          ),
+                          borderRadius: BorderRadius.circular(15),
+                          border: Border.all(
+                            color: Colors.amber.shade900,
+                            width: 2,
+                          ),
                         ),
-                        borderRadius: BorderRadius.circular(15),
-                        border: Border.all(
-                          color: Colors.amber.shade900,
-                          width: 2,
-                        ),
-                      ),
-                      child: Center(
-                        child: Icon(
-                          Icons.refresh,
-                          color: Colors.white,
-                          size: 24,
+                        child: Center(
+                          child: Icon(
+                            Icons.refresh,
+                            color: Colors.white,
+                            size: 24,
+                          ),
                         ),
                       ),
                     ),

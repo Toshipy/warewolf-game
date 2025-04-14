@@ -18,6 +18,27 @@ class RoomService {
     }
   }
 
+  // 部屋一覧を取得
+  Future<List<Map<String, dynamic>>> getRooms() async {
+    try {
+      final querySnapshot =
+          await _firestore
+              .collection('rooms')
+              .orderBy('createdAt', descending: true)
+              .get();
+
+      // 取得したデータをリストに変換
+      return querySnapshot.docs.map((doc) {
+        final data = doc.data() as Map<String, dynamic>;
+        data['id'] = doc.id;
+        return data;
+      }).toList();
+    } catch (e) {
+      print('Firestore Error: $e');
+      rethrow;
+    }
+  }
+
   // 新しい部屋を作成
   Future<DocumentReference> createRoom({
     required String title,
