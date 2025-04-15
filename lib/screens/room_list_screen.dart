@@ -16,10 +16,44 @@ class _RoomListScreenState extends State<RoomListScreen> {
   String? _errorMessage;
   List<Map<String, dynamic>> _rooms = [];
 
+  // 人数に応じた役職を返す関数
+  List<String> _getRolesByPlayerCount(int count) {
+    switch (count) {
+      case 4:
+        return ['市民', '市民', '人狼', '狩人'];
+      case 5:
+        return ['市民', '市民', '市民', '人狼', '狩人'];
+      case 6:
+        return ['市民', '市民', '占い師', '人狼', '人狼', '狩人'];
+      case 7:
+        return ['市民', '市民', '市民', '占い師', '人狼', '人狼', '狩人'];
+      case 8:
+        return ['市民', '市民', '市民', '霊能者', '占い師', '人狼', '人狼', '狩人'];
+      case 9:
+        return ['市民', '市民', '市民', '霊能者', '占い師', '人狼', '人狼', '狩人', '狂人'];
+      default:
+        return ['市民', '市民', '人狼', '狩人'];
+    }
+  }
+
+  // 役職リストを文字列に変換する関数
+  String _getRolesDescription(List<String> roles) {
+    Map<String, int> roleCounts = {};
+    for (var role in roles) {
+      roleCounts[role] = (roleCounts[role] ?? 0) + 1;
+    }
+
+    return roleCounts.entries
+        .map((entry) {
+          return '${entry.key}×${entry.value}';
+        })
+        .join('、');
+  }
+
   void _showCreateRoomDialog(BuildContext context) {
-    int maxPlayers = 9;
-    List<String> roles = ['市民', '市民', '占い師', '霊能者', '狩人', '人狼', '人狼', '狂信者'];
-    final titleController = TextEditingController(text: '新しい部屋');
+    int maxPlayers = 4;
+    List<String> roles = _getRolesByPlayerCount(4);
+    final titleController = TextEditingController(text: '');
     bool isCreating = false;
 
     showDialog(
@@ -50,7 +84,7 @@ class _RoomListScreenState extends State<RoomListScreen> {
                       ),
                       value: maxPlayers,
                       items:
-                          [4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+                          [4, 5, 6, 7, 8, 9]
                               .map(
                                 (number) => DropdownMenuItem<int>(
                                   value: number,
@@ -63,9 +97,27 @@ class _RoomListScreenState extends State<RoomListScreen> {
                               ? null
                               : (value) {
                                 if (value != null) {
-                                  maxPlayers = value;
+                                  setState(() {
+                                    maxPlayers = value;
+                                    roles = _getRolesByPlayerCount(value);
+                                  });
                                 }
                               },
+                    ),
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: Colors.brown.shade100,
+                        borderRadius: BorderRadius.circular(5),
+                      ),
+                      child: Text(
+                        '役職構成：${_getRolesDescription(roles)}',
+                        style: TextStyle(
+                          color: Colors.brown.shade900,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                     ),
                     const SizedBox(height: 20),
                   ],
@@ -335,6 +387,26 @@ class _RoomListScreenState extends State<RoomListScreen> {
       ),
       child: Column(
         children: [
+          // 部屋のタイトル
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 15),
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(color: Colors.amber.shade900, width: 1),
+              ),
+            ),
+            child: Text(
+              room['title'] ?? '誰でも歓迎',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ),
+
           // 役職ボタン一覧
           Container(
             padding: const EdgeInsets.symmetric(vertical: 10),

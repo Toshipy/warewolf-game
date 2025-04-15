@@ -58,21 +58,34 @@ class RoomService {
       String userName = userData?['displayName'] ?? '？？？';
 
       // Firestoreに部屋データを登録
-      return _firestore.collection('rooms').add({
-        'title': title,
-        'currentPlayers': 1,
-        'maxPlayers': maxPlayers,
-        'roles': roles,
-        'createdAt': FieldValue.serverTimestamp(),
-        'createdBy': userId,
-        'players': {
-          userId: {
-            'displayName': userName,
-            'joinedAt': FieldValue.serverTimestamp(),
-            'isHost': true,
-          },
-        },
-      });
+      return _firestore
+          .collection('rooms')
+          .add({
+            'title': title,
+            'currentPlayers': 1,
+            'maxPlayers': maxPlayers,
+            'roles': roles,
+            'createdAt': FieldValue.serverTimestamp(),
+            'createdBy': userId,
+            'players': {
+              userId: {
+                'displayName': userName,
+                'joinedAt': FieldValue.serverTimestamp(),
+                'isHost': true,
+              },
+            },
+          })
+          .then((roomRef) async {
+            // 入室メッセージを追加
+            await roomRef.collection('messages').add({
+              'text': '${userName}が入室しました',
+              'senderId': 'system',
+              'senderName': 'システム',
+              'timestamp': FieldValue.serverTimestamp(),
+              'type': 'system',
+            });
+            return roomRef;
+          });
     } catch (e) {
       print('Firebase Error: $e');
       rethrow;
@@ -120,6 +133,19 @@ class RoomService {
         },
         'currentPlayers': FieldValue.increment(1),
       });
+
+      // 入室メッセージを追加
+      await _firestore
+          .collection('rooms')
+          .doc(roomId)
+          .collection('messages')
+          .add({
+            'text': '${userData['displayName']}が入室しました',
+            'senderId': 'system',
+            'senderName': 'システム',
+            'timestamp': FieldValue.serverTimestamp(),
+            'type': 'system',
+          });
     } catch (e) {
       print('入室エラー: $e');
       rethrow;

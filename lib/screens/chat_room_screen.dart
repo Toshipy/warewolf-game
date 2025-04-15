@@ -67,7 +67,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                       .collection('rooms')
                       .doc(widget.roomId)
                       .collection('messages')
-                      .orderBy('timestamp', descending: true)
+                      .orderBy('timestamp', descending: false)
                       .snapshots(),
               builder: (context, snapshot) {
                 if (snapshot.hasError) {
@@ -81,17 +81,64 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                 final messages = snapshot.data!.docs;
 
                 return ListView.builder(
-                  reverse: true,
+                  reverse: false,
                   itemCount: messages.length,
                   itemBuilder: (context, index) {
                     final message =
                         messages[index].data() as Map<String, dynamic>;
+                    if (message['type'] == 'system') {
+                      // システムメッセージの表示
+                      return Container(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: Center(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 8,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.grey.shade800.withOpacity(0.5),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Text(
+                              message['text'] ?? '',
+                              style: const TextStyle(
+                                color: Colors.white70,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    }
                     return MessageBubble(
                       senderName: message['senderName'] ?? '？？？',
                       text: message['text'] ?? '',
                       isMe: message['senderId'] == _auth.currentUser?.uid,
                     );
                   },
+                );
+              },
+            ),
+          ),
+
+          // 参加人数の表示
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8.0),
+            decoration: BoxDecoration(color: Colors.brown.shade900),
+            child: StreamBuilder<DocumentSnapshot>(
+              stream:
+                  _firestore.collection('rooms').doc(widget.roomId).snapshots(),
+              builder: (context, snapshot) {
+                if (!snapshot.hasData) return const Text('読み込み中...');
+                final roomData =
+                    snapshot.data!.data() as Map<String, dynamic>? ?? {};
+                return Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    '参加人数: ${roomData['currentPlayers'] ?? 0} / ${roomData['maxPlayers'] ?? 0}',
+                    style: const TextStyle(color: Colors.white),
+                  ),
                 );
               },
             ),
