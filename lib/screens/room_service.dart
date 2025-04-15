@@ -51,8 +51,11 @@ class RoomService {
       }
 
       String userId = _auth.currentUser!.uid;
-      String userName =
-          _auth.currentUser!.displayName ?? 'プレイヤー${userId.substring(0, 4)}';
+
+      // ユーザー情報を取得
+      final userDoc = await _firestore.collection('users').doc(userId).get();
+      final userData = userDoc.data();
+      String userName = userData?['displayName'] ?? '？？？';
 
       // Firestoreに部屋データを登録
       return _firestore.collection('rooms').add({
@@ -64,7 +67,7 @@ class RoomService {
         'createdBy': userId,
         'players': {
           userId: {
-            'name': userName,
+            'displayName': userName,
             'joinedAt': FieldValue.serverTimestamp(),
             'isHost': true,
           },
