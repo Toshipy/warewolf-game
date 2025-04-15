@@ -54,6 +54,14 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
             if (_timer == null && _isGameStarted) {
               _startTimer();
             }
+            // 残り秒数をFirestoreの値から計算
+            final lastUpdatedAt = gameState['lastUpdatedAt'] as Timestamp?;
+            final remaining = gameState['remainingSeconds'] as int;
+            if (lastUpdatedAt != null && remaining > 0) {
+              final now = Timestamp.now();
+              final elapsed = now.seconds - lastUpdatedAt.seconds;
+              _remainingSeconds = (remaining - elapsed).clamp(0, 999);
+            }
           });
         }
         final executed = (snapshot.data()?['executedPlayers'] as List<dynamic>?)?.cast<String>() ?? [];
@@ -284,8 +292,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     final gameState =
         (roomDoc.data()?['gameState'] ?? {}) as Map<String, dynamic>;
     final lastUpdatedAt = gameState['lastUpdatedAt'] as Timestamp?;
+    final remaining = gameState['remainingSeconds'] as int;
 
-    if (lastUpdatedAt != null) {
+    if (lastUpdatedAt != null && remaining > 0) {
       final now = Timestamp.now();
       final elapsedSeconds = now.seconds - lastUpdatedAt.seconds;
       final remainingSeconds =
