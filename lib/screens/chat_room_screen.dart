@@ -29,6 +29,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   bool _isNightTime = false;
   bool _isVotingTime = false;
   int _currentDay = 1;
+String? _votedPlayerId;
+  Map<String, int> _voteResults = {};
+  Set<String> _executedPlayers = {};
 
   @override
   void initState() {
@@ -134,59 +137,141 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     return 30; // 話し合い時間: 30秒
   }
 
-  void _switchPhase() async {
-    bool nextIsNight = _isNightTime;
-    bool nextIsVoting = _isVotingTime;
-    int nextDay = _currentDay;
+  void _showVotingDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        return StreamBuilder<DocumentSnapshot>(
+          stream: _firestore.collection('rooms').doc(widget.roomId).snapshots(),
+          builder: (context, snapshot) {
+            if (!snapshot.hasData) {
+              return const Center(child: CircularProgressIndicator());
+            }
 
-    // フェーズの切り替え
-    if (!_isNightTime && !_isVotingTime) {
-      // 話し合い → 投票
-      nextIsVoting = true;
-    } else if (!_isNightTime && _isVotingTime) {
-      // 投票 → 夜
-      nextIsNight = true;
-      nextIsVoting = false;
-    } else {
-      // 夜 → 昼（話し合い）
-      nextIsNight = false;
-      nextIsVoting = false;
-      nextDay = _currentDay + 1;
-    }
+            final roomData = snapshot.data!.data() as Map<String, dynamic>?;
+            if (roomData == null) return const SizedBox.shrink();
 
-    // Firestoreの状態を更新
-    await _firestore.collection('rooms').doc(widget.roomId).update({
-      'gameState': {
-        'isNightTime': nextIsNight,
-        'isVotingTime': nextIsVoting,
-        'currentDay': nextDay,
-        'remainingSeconds': _getPhaseSeconds(),
-        'lastUpdatedAt': FieldValue.serverTimestamp(),
+            final players =
+                (roomData['players'] as Map<dynamic, dynamic>?)
+                    ?.cast<String, dynamic>() ??
+                {};
+            final currentUserId = _auth.currentUser?.uid;
+
+            // 自分以外の生存しているプレイヤーのリストを作成
+            final alivePlayers =
+                players.entries
+                    .where(
+                      (player) =>
+                          player.key != currentUserId &&
+                          !_executedPlayers.contains(player.key),
+                    )
+                    .toList();
+
+            return AlertDialog(
+              title: const Text('投票'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('処刑するプレイヤーを選択してください'),
+                  const SizedBox(height: 16),
+                  ...alivePlayers.map(
+                    (player) => ListTile(
+                      title: Text(player.value['displayName'] ?? '不明'),
+                      tileColor:
+                          _votedPlayerId == player.key
+                              ? Colors.blue.withOpacity(0.2)
+                              : null,
+                      onTap: () {
+                        setState(() => _votedPlayerId = player.key);
+                        _submitVote(player.key);
+                        Navigator.of(context).pop();
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
       },
-    });
+    );
+  }
 
-    // システムメッセージを追加
-    String phaseMessage;
-    if (nextIsNight) {
-      phaseMessage = '🌙 ${_currentDay}日目の夜になりました';
-    } else if (nextIsVoting) {
-      phaseMessage = '🗳️ 投票の時間です（${_getPhaseSeconds()}秒）';
-    } else {
-      phaseMessage = '☀️ ${nextDay}日目の昼になりました';
+  Future<void> _submitVote(String targetPlayerId) async {
+    try {
+      final currentUserId = _auth.currentUser?.uid;
+      if (currentUserId == null) return;
+
+      await _firestore.collection('rooms').doc(widget.roomId).update({
+        'votes.$currentUserId': targetPlayerId,
+      });
+    } catch (e) {
+      print('Error submitting vote: $e');
     }
+  }
 
-    await _firestore
-        .collection('rooms')
-        .doc(widget.roomId)
-        .collection('messages')
-        .add({
-          'type': 'system',
-          'text': phaseMessage,
-          'timestamp': FieldValue.serverTimestamp(),
+  Future<void> _processVoteResults() async {
+    try {
+      final roomDoc =
+          await _firestore.collection('rooms').doc(widget.roomId).get();
+      final roomData = roomDoc.data() as Map<String, dynamic>?;
+      if (roomData == null) return;
+
+      final votes =
+          (roomData['votes'] as Map<dynamic, dynamic>?)
+              ?.cast<String, String>() ??
+          {};
+      final voteCount = <String, int>{};
+
+      // 投票を集計
+      votes.values.forEach((targetId) {
+        voteCount[targetId] = (voteCount[targetId] ?? 0) + 1;
+      });
+
+      // 最多得票者を特定
+      int maxVotes = 0;
+      String? executedPlayerId;
+      voteCount.forEach((playerId, count) {
+        if (count > maxVotes) {
+          maxVotes = count;
+          executedPlayerId = playerId;
+        }
+      });
+
+      if (executedPlayerId != null) {
+        final players =
+            (roomData['players'] as Map<dynamic, dynamic>?)
+                ?.cast<String, dynamic>() ??
+            {};
+        final executedPlayerName =
+            players[executedPlayerId]?['displayName'] ?? '不明';
+        final executedPlayerRole = players[executedPlayerId]?['role'] ?? '不明';
+
+        // 処刑されたプレイヤーを記録
+        _executedPlayers.add(executedPlayerId!);
+
+        // 処刑結果を保存
+        await _firestore.collection('rooms').doc(widget.roomId).update({
+          'executedPlayers': FieldValue.arrayUnion([executedPlayerId]),
+          'votes': {}, // 投票をリセット
         });
 
-    // 新しいタイマーを開始
-    _startTimer();
+        // システムメッセージを送信
+        await _firestore
+            .collection('rooms')
+            .doc(widget.roomId)
+            .collection('messages')
+            .add({
+              'type': 'system',
+              'text':
+                  '⚠️ ${executedPlayerName}が処刑されました。\n役職: $executedPlayerRole',
+              'timestamp': FieldValue.serverTimestamp(),
+            });
+      }
+    } catch (e) {
+      print('Error processing vote results: $e');
+    }
   }
 
   void _updateTimer() async {
@@ -423,36 +508,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                         itemCount: sortedPlayers.length,
                         itemBuilder: (context, index) {
                           final player = sortedPlayers[index];
-                          return Container(
-                            width: 60,
-                            margin: const EdgeInsets.symmetric(horizontal: 4),
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                CircleAvatar(
-                                  backgroundColor: Colors.brown.shade900,
-                                  child: Text(
-                                    player.value['displayName']
-                                            ?.toString()
-                                            .characters
-                                            .first ??
-                                        '?',
-                                    style: const TextStyle(color: Colors.white),
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  player.value['displayName'] ?? '？？？',
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 12,
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ],
-                            ),
-                          );
+                          return _buildPlayerAvatar(player);
                         },
                       );
                     },
@@ -517,42 +573,64 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
             ),
           ),
 
-          // メッセージ入力エリア
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8.0),
-            decoration: BoxDecoration(color: Colors.brown.shade900),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _messageController,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: const InputDecoration(
-                      hintText: 'メッセージを入力...',
-                      hintStyle: TextStyle(color: Colors.white70),
-                      border: InputBorder.none,
+          // 投票ボタン（投票時間中のみ表示）
+          if (_isVotingTime &&
+              !_executedPlayers.contains(_auth.currentUser?.uid))
+            Container(
+              padding: const EdgeInsets.all(8),
+              color: Colors.red.shade800,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  ElevatedButton(
+                    onPressed: _showVotingDialog,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: Colors.red.shade800,
                     ),
-                    onSubmitted: (text) {
-                      if (text.trim().isNotEmpty) {
-                        _sendMessage();
-                      }
-                    },
+                    child: const Text('投票する'),
                   ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.send, color: Colors.white),
-                  onPressed: _sendMessage,
-                ),
-                TextButton(
-                  onPressed: _leaveRoom,
-                  child: Text(
-                    '退出',
-                    style: TextStyle(color: Colors.red.shade400),
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
+
+          // メッセージ入力エリア（処刑されたプレイヤーは入力不可）
+          if (!_executedPlayers.contains(_auth.currentUser?.uid))
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8.0),
+              decoration: BoxDecoration(color: Colors.brown.shade900),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _messageController,
+                      style: const TextStyle(color: Colors.white),
+                      decoration: const InputDecoration(
+                        hintText: 'メッセージを入力...',
+                        hintStyle: TextStyle(color: Colors.white70),
+                        border: InputBorder.none,
+                      ),
+                      onSubmitted: (text) {
+                        if (text.trim().isNotEmpty) {
+                          _sendMessage();
+                        }
+                      },
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.send, color: Colors.white),
+                    onPressed: _sendMessage,
+                  ),
+                  TextButton(
+                    onPressed: _leaveRoom,
+                    child: Text(
+                      '退出',
+                      style: TextStyle(color: Colors.red.shade400),
+                    ),
+                  ),
+                ],
+              ),
+            ),
         ],
       ),
     );
@@ -772,6 +850,107 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     // 一括で更新を実行
     await batch.commit();
     print('Debug: ゲームを開始しました');
+  }
+
+  // プレイヤー表示を更新
+  Widget _buildPlayerAvatar(MapEntry<String, dynamic> player) {
+    final isExecuted = _executedPlayers.contains(player.key);
+    return Container(
+      width: 60,
+      margin: const EdgeInsets.symmetric(horizontal: 4),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Stack(
+            children: [
+              CircleAvatar(
+                backgroundColor:
+                    isExecuted ? Colors.grey : Colors.brown.shade900,
+                child: Text(
+                  player.value['displayName']?.toString().characters.first ??
+                      '?',
+                  style: TextStyle(
+                    color: isExecuted ? Colors.black38 : Colors.white,
+                  ),
+                ),
+              ),
+              if (isExecuted)
+                const Positioned.fill(
+                  child: Icon(Icons.close, color: Colors.red, size: 32),
+                ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            player.value['displayName'] ?? '？？？',
+            style: TextStyle(
+              color: isExecuted ? Colors.grey : Colors.white,
+              fontSize: 12,
+              decoration: isExecuted ? TextDecoration.lineThrough : null,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _switchPhase() async {
+    bool nextIsNight = _isNightTime;
+    bool nextIsVoting = _isVotingTime;
+    int nextDay = _currentDay;
+
+    // フェーズの切り替え
+    if (!_isNightTime && !_isVotingTime) {
+      // 話し合い → 投票
+      nextIsVoting = true;
+    } else if (!_isNightTime && _isVotingTime) {
+      // 投票結果を処理
+      await _processVoteResults();
+      // 投票 → 夜
+      nextIsNight = true;
+      nextIsVoting = false;
+    } else {
+      // 夜 → 昼（話し合い）
+      nextIsNight = false;
+      nextIsVoting = false;
+      nextDay = _currentDay + 1;
+    }
+
+    // Firestoreの状態を更新
+    await _firestore.collection('rooms').doc(widget.roomId).update({
+      'gameState': {
+        'isNightTime': nextIsNight,
+        'isVotingTime': nextIsVoting,
+        'currentDay': nextDay,
+        'remainingSeconds': _getPhaseSeconds(),
+        'lastUpdatedAt': FieldValue.serverTimestamp(),
+      },
+    });
+
+    // システムメッセージを追加
+    String phaseMessage;
+    if (nextIsNight) {
+      phaseMessage = '🌙 ${_currentDay}日目の夜になりました';
+    } else if (nextIsVoting) {
+      phaseMessage = '🗳️ 投票の時間です（${_getPhaseSeconds()}秒）';
+    } else {
+      phaseMessage = '☀️ ${nextDay}日目の昼になりました';
+    }
+
+    await _firestore
+        .collection('rooms')
+        .doc(widget.roomId)
+        .collection('messages')
+        .add({
+          'type': 'system',
+          'text': phaseMessage,
+          'timestamp': FieldValue.serverTimestamp(),
+        });
+
+    // 新しいタイマーを開始
+    _startTimer();
   }
 }
 
