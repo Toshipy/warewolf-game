@@ -20,12 +20,29 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   final TextEditingController _messageController = TextEditingController();
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
+  final ScrollController _scrollController = ScrollController();
   String? _displayName;
 
   @override
   void initState() {
     super.initState();
     _initializeDisplayName();
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _scrollToBottom() {
+    if (_scrollController.hasClients) {
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
+    }
   }
 
   Future<void> _initializeDisplayName() async {
@@ -80,7 +97,13 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 
                 final messages = snapshot.data!.docs;
 
+                // 新しいメッセージが来たら自動スクロール
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  _scrollToBottom();
+                });
+
                 return ListView.builder(
+                  controller: _scrollController,
                   reverse: false,
                   itemCount: messages.length,
                   itemBuilder: (context, index) {
