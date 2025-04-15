@@ -379,28 +379,57 @@ class _RoomListScreenState extends State<RoomListScreen> {
           ),
 
           // 入室ボタン
-          Container(
-            width: 120,
-            height: 50,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [Colors.teal.shade800, Colors.teal.shade600],
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
+          GestureDetector(
+            onTap: () async {
+              try {
+                await _roomService.joinRoom(room['id']);
+                if (mounted) {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder:
+                          (context) => ChatRoomScreen(
+                            roomId: room['id'],
+                            roomTitle: room['title'],
+                          ),
+                    ),
+                  );
+                }
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(e.toString()),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+              }
+            },
+            child: Container(
+              width: 120,
+              height: 50,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [Colors.teal.shade800, Colors.teal.shade600],
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                ),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.teal.shade700, width: 1),
               ),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: Colors.teal.shade700, width: 1),
-            ),
-            child: Center(
-              child: Text(
-                '入室 ${room['currentPlayers']}/${room['maxPlayers']}',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
+              child: Center(
+                child: Text(
+                  '入室 ${room['currentPlayers']}/${room['maxPlayers']}',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
             ),
           ),
+          const SizedBox(height: 10),
         ],
       ),
     );

@@ -37,6 +37,12 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    // ログアウト時にログイン状態を更新
+    if (_userId != null) {
+      _firestore.collection('users').doc(_userId!.uid).update({
+        'isLoggedIn': false,
+      });
+    }
     _loginEmailController.dispose();
     _loginPasswordController.dispose();
     _registerEmailController.dispose();
@@ -66,6 +72,24 @@ class _HomeScreenState extends State<HomeScreen> {
       );
 
       if (userCredential.user != null) {
+        // ログイン状態をチェック
+        final userDoc =
+            await _firestore
+                .collection('users')
+                .doc(userCredential.user!.uid)
+                .get();
+        final userData = userDoc.data();
+
+        if (userData?['isLoggedIn'] == true) {
+          // 既にログイン中の場合はエラー
+          setState(() {
+            _errorMessage = 'このアカウントは既に他の端末でログインしています';
+          });
+          await _auth.signOut();
+          return;
+        }
+
+        // ログイン状態を更新
         await _updateUserData(userCredential.user!);
         setState(() {
           _userId = userCredential.user;
@@ -125,6 +149,7 @@ class _HomeScreenState extends State<HomeScreen> {
         'displayName': displayName,
         'createdAt': FieldValue.serverTimestamp(),
         'lastLogin': FieldValue.serverTimestamp(),
+        'isLoggedIn': true,
       };
       await _firestore.collection('users').doc(uid).set(userData);
     } catch (e) {
@@ -137,9 +162,36 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       await _firestore.collection('users').doc(user.uid).update({
         'lastLogin': FieldValue.serverTimestamp(),
+        'isLoggedIn': true,
       });
     } catch (e) {
       print('ユーザー情報の更新に失敗しました: $e');
+    }
+  }
+
+  Future<void> _logout() async {
+    try {
+      setState(() {
+        _isLoading = true;
+      });
+
+      if (_userId != null) {
+        await _firestore.collection('users').doc(_userId!.uid).update({
+          'isLoggedIn': false,
+        });
+        await _auth.signOut();
+      }
+
+      setState(() {
+        _userId = null;
+        _currentState = 'home';
+      });
+    } catch (e) {
+      print('ログアウトに失敗しました: $e');
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
     }
   }
 
@@ -242,48 +294,81 @@ class _HomeScreenState extends State<HomeScreen> {
               _isLoading
                   ? const CircularProgressIndicator()
                   : _currentState == 'loggedIn'
-                  ? GestureDetector(
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const RoomListScreen(),
-                        ),
-                      );
-                    },
-                    child: Container(
-                      width: 200,
-                      height: 80,
-                      decoration: BoxDecoration(
-                        color: Colors.blue.shade900,
-                        borderRadius: BorderRadius.circular(10),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.5),
-                            spreadRadius: 2,
-                            blurRadius: 5,
-                            offset: const Offset(0, 3),
-                          ),
-                        ],
-                        border: Border.all(color: Colors.white, width: 2),
-                      ),
-                      child: Center(
-                        child: Text(
-                          'START',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                            shadows: [
-                              Shadow(
+                  ? Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const SizedBox(height: 100),
+                      GestureDetector(
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => const RoomListScreen(),
+                            ),
+                          );
+                        },
+                        child: Container(
+                          width: 200,
+                          height: 80,
+                          decoration: BoxDecoration(
+                            color: Colors.blue.shade900,
+                            borderRadius: BorderRadius.circular(10),
+                            boxShadow: [
+                              BoxShadow(
                                 color: Colors.black.withOpacity(0.5),
+                                spreadRadius: 2,
+                                blurRadius: 5,
                                 offset: const Offset(0, 3),
                               ),
                             ],
+                            border: Border.all(color: Colors.white, width: 2),
+                          ),
+                          child: Center(
+                            child: Text(
+                              'START',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                                shadows: [
+                                  Shadow(
+                                    color: Colors.black.withOpacity(0.5),
+                                    offset: const Offset(0, 3),
+                                  ),
+                                ],
+                              ),
+                            ),
                           ),
                         ),
                       ),
-                    ),
+                      const SizedBox(height: 100),
+                      Container(
+                        width: 200,
+                        height: 50,
+                        child: ElevatedButton(
+                          onPressed: _logout,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.brown.shade900,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                              side: BorderSide(
+                                color: Colors.amber.shade900,
+                                width: 2,
+                              ),
+                            ),
+                            elevation: 5,
+                          ),
+                          child: const Text(
+                            'ログアウト',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   )
                   : _currentState == 'login' || _currentState == 'register'
                   ? _buildAuthForm()
