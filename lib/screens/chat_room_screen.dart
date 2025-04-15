@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'dart:async';
 
 class ChatRoomScreen extends StatefulWidget {
   final String roomId;
@@ -23,16 +24,42 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   final ScrollController _scrollController = ScrollController();
   String? _displayName;
   bool _isGameStarted = false;
+  Timer? _timer;
+  int _remainingSeconds = 30;
+  bool _isNightTime = false;
+  bool _isVotingTime = false;
+  int _currentDay = 1;
 
   @override
   void initState() {
     super.initState();
     _initializeDisplayName();
     _checkGameStatus();
+    // ゲーム状態の監視を開始
+    _firestore.collection('rooms').doc(widget.roomId).snapshots().listen((
+      snapshot,
+    ) {
+      if (snapshot.exists) {
+        final gameState =
+            (snapshot.data()?['gameState'] ?? {}) as Map<String, dynamic>;
+        if (gameState.isNotEmpty) {
+          setState(() {
+            _isGameStarted = snapshot.data()?['isStarted'] ?? false;
+            _isNightTime = gameState['isNightTime'] as bool;
+            _isVotingTime = gameState['isVotingTime'] as bool;
+            _currentDay = gameState['currentDay'] as int;
+            if (_timer == null && _isGameStarted) {
+              _startTimer();
+            }
+          });
+        }
+      }
+    });
   }
 
   @override
   void dispose() {
+    _timer?.cancel();
     _scrollController.dispose();
     super.dispose();
   }
@@ -81,111 +108,115 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     });
   }
 
-  Future<void> _startGame() async {
-    try {
-      final roomRef = _firestore.collection('rooms').doc(widget.roomId);
-      final roomDoc = await roomRef.get();
-      final roomData = roomDoc.data() as Map<String, dynamic>;
-      final players = roomData['players'] as Map<String, dynamic>;
-      final maxPlayers = roomData['maxPlayers'] as int;
-      final isStarted = roomData['isStarted'] ?? false;
+  void _startTimer() {
+    _timer?.cancel();
 
-      print('Debug: プレイヤー数: ${players.length}, 最大プレイヤー数: $maxPlayers');
-      print('Debug: ゲーム開始状態: $isStarted');
-
-      if (players.length == maxPlayers && !isStarted) {
-        // トランザクションで一括処理を行う
-        await _firestore.runTransaction((transaction) async {
-          // 再度ゲーム開始状態をチェック
-          final freshDoc = await transaction.get(roomRef);
-          if (freshDoc.data()?['isStarted'] == true) {
-            print('Debug: 他のプレイヤーによってすでにゲームが開始されています');
-            return;
-          }
-
-          print('Debug: プレイヤー数が最大に達しました');
-          // 役職の割り当て
-          final roles = _assignRoles(players.length);
-          final playerEntries = players.entries.toList();
-
-          print('Debug: 割り当てられた役職: $roles');
-
-          // 各プレイヤーに役職を割り当て
-          for (var i = 0; i < playerEntries.length; i++) {
-            transaction.update(roomRef, {
-              'players.${playerEntries[i].key}.role': roles[i],
-            });
-          }
-
-          // ゲーム開始フラグを設定
-          transaction.update(roomRef, {'isStarted': true});
-
-          // システムメッセージを追加
-          final messageRef = roomRef.collection('messages').doc();
-          transaction.set(messageRef, {
-            'type': 'system',
-            'text': 'ゲームが開始されました！',
-            'timestamp': FieldValue.serverTimestamp(),
-          });
-        });
-
-        print('Debug: ゲームを開始しました');
-      } else {
-        print('Debug: プレイヤー数が不足しているか、すでにゲームが開始されています');
-      }
-    } catch (e) {
-      print('Error starting game: $e');
-    }
-  }
-
-  List<String> _assignRoles(int playerCount) {
-    final roles = <String>[];
-    // 人狼の数を決定（プレイヤー数の約1/4）
-    final werewolfCount = (playerCount / 4).ceil();
-
-    // 人狼を追加
-    for (var i = 0; i < werewolfCount; i++) {
-      roles.add('人狼');
-    }
-
-    // 村人を追加
-    for (var i = 0; i < playerCount - werewolfCount; i++) {
-      roles.add('市民');
-    }
-
-    // 役職をシャッフル
-    roles.shuffle();
-    return roles;
-  }
-
-  Future<void> _startGameWithBatch(
-    List<MapEntry<String, dynamic>> players,
-    String roomId,
-  ) async {
-    final batch = _firestore.batch();
-
-    // 役職の割り当て
-    final roles = _assignRoles(players.length);
-    for (var i = 0; i < players.length; i++) {
-      final playerRef = _firestore.collection('rooms').doc(roomId);
-      batch.update(playerRef, {'players.${players[i].key}.role': roles[i]});
-    }
-
-    // ゲーム開始フラグを設定
-    final roomRef = _firestore.collection('rooms').doc(roomId);
-    batch.update(roomRef, {'isStarted': true});
-
-    // システムメッセージを追加
-    final messageRef = roomRef.collection('messages').doc();
-    batch.set(messageRef, {
-      'type': 'system',
-      'text': 'ゲームが開始されました！',
-      'timestamp': FieldValue.serverTimestamp(),
+    // Firestoreにタイマーの初期状態を設定
+    _firestore.collection('rooms').doc(widget.roomId).update({
+      'gameState': {
+        'isNightTime': _isNightTime,
+        'isVotingTime': _isVotingTime,
+        'currentDay': _currentDay,
+        'remainingSeconds': _getPhaseSeconds(),
+        'lastUpdatedAt': FieldValue.serverTimestamp(),
+      },
     });
 
-    // 一括で更新を実行
-    await batch.commit();
-    print('Debug: ゲームを開始しました');
+    // ローカルのタイマーを開始
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      _updateTimer();
+    });
+  }
+
+  int _getPhaseSeconds() {
+    if (_isNightTime) return 10; // 夜時間: 10秒
+    if (_isVotingTime) return 10; // 投票時間: 10秒
+    return 30; // 話し合い時間: 30秒
+  }
+
+  void _switchPhase() async {
+    bool nextIsNight = _isNightTime;
+    bool nextIsVoting = _isVotingTime;
+    int nextDay = _currentDay;
+
+    // フェーズの切り替え
+    if (!_isNightTime && !_isVotingTime) {
+      // 話し合い → 投票
+      nextIsVoting = true;
+    } else if (!_isNightTime && _isVotingTime) {
+      // 投票 → 夜
+      nextIsNight = true;
+      nextIsVoting = false;
+    } else {
+      // 夜 → 昼（話し合い）
+      nextIsNight = false;
+      nextIsVoting = false;
+      nextDay = _currentDay + 1;
+    }
+
+    // Firestoreの状態を更新
+    await _firestore.collection('rooms').doc(widget.roomId).update({
+      'gameState': {
+        'isNightTime': nextIsNight,
+        'isVotingTime': nextIsVoting,
+        'currentDay': nextDay,
+        'remainingSeconds': _getPhaseSeconds(),
+        'lastUpdatedAt': FieldValue.serverTimestamp(),
+      },
+    });
+
+    // システムメッセージを追加
+    String phaseMessage;
+    if (nextIsNight) {
+      phaseMessage = '🌙 ${_currentDay}日目の夜になりました';
+    } else if (nextIsVoting) {
+      phaseMessage = '🗳️ 投票の時間です（${_getPhaseSeconds()}秒）';
+    } else {
+      phaseMessage = '☀️ ${nextDay}日目の昼になりました';
+    }
+
+    await _firestore
+        .collection('rooms')
+        .doc(widget.roomId)
+        .collection('messages')
+        .add({
+          'type': 'system',
+          'text': phaseMessage,
+          'timestamp': FieldValue.serverTimestamp(),
+        });
+
+    // 新しいタイマーを開始
+    _startTimer();
+  }
+
+  void _updateTimer() async {
+    final roomDoc =
+        await _firestore.collection('rooms').doc(widget.roomId).get();
+    final gameState =
+        (roomDoc.data()?['gameState'] ?? {}) as Map<String, dynamic>;
+    final lastUpdatedAt = gameState['lastUpdatedAt'] as Timestamp?;
+
+    if (lastUpdatedAt != null) {
+      final now = Timestamp.now();
+      final elapsedSeconds = now.seconds - lastUpdatedAt.seconds;
+      final remainingSeconds =
+          (gameState['remainingSeconds'] as int) - elapsedSeconds;
+
+      if (remainingSeconds <= 0) {
+        _timer?.cancel();
+        if (roomDoc.data()?['players'][_auth.currentUser?.uid]?['isHost'] ==
+            true) {
+          _switchPhase();
+        }
+      } else {
+        setState(() {
+          _remainingSeconds = remainingSeconds;
+          _isNightTime = gameState['isNightTime'] as bool;
+          _isVotingTime = gameState['isVotingTime'] as bool;
+          _currentDay = gameState['currentDay'] as int;
+        });
+      }
+    }
   }
 
   @override
@@ -199,74 +230,100 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
           style: const TextStyle(color: Colors.white),
         ),
       ),
+      backgroundColor: _isNightTime ? Colors.black87 : null,
       body: Column(
         children: [
+          // タイマー表示
+          if (_isGameStarted)
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              color: _getPhaseColor(),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(_getPhaseIcon(), color: Colors.white),
+                  const SizedBox(width: 8),
+                  Text(
+                    '${_currentDay}日目 ${_getPhaseText()} - 残り${_remainingSeconds}秒',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
           // チャットメッセージ表示エリア
           Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream:
-                  _firestore
-                      .collection('rooms')
-                      .doc(widget.roomId)
-                      .collection('messages')
-                      .orderBy('timestamp', descending: false)
-                      .snapshots(),
-              builder: (context, snapshot) {
-                if (snapshot.hasError) {
-                  return const Center(child: Text('エラーが発生しました'));
-                }
+            child: Container(
+              color: _isNightTime ? Colors.black54 : null,
+              child: StreamBuilder<QuerySnapshot>(
+                stream:
+                    _firestore
+                        .collection('rooms')
+                        .doc(widget.roomId)
+                        .collection('messages')
+                        .orderBy('timestamp', descending: false)
+                        .snapshots(),
+                builder: (context, snapshot) {
+                  if (snapshot.hasError) {
+                    return const Center(child: Text('エラーが発生しました'));
+                  }
 
-                if (!snapshot.hasData) {
-                  return const Center(child: CircularProgressIndicator());
-                }
+                  if (!snapshot.hasData) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
 
-                final messages = snapshot.data!.docs;
+                  final messages = snapshot.data!.docs;
 
-                // 新しいメッセージが来たら自動スクロール
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  _scrollToBottom();
-                });
+                  // 新しいメッセージが来たら自動スクロール
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    _scrollToBottom();
+                  });
 
-                return ListView.builder(
-                  controller: _scrollController,
-                  reverse: false,
-                  itemCount: messages.length,
-                  itemBuilder: (context, index) {
-                    final message =
-                        messages[index].data() as Map<String, dynamic>;
-                    if (message['type'] == 'system') {
-                      // システムメッセージの表示
-                      return Container(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        child: Center(
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 8,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.grey.shade800.withOpacity(0.5),
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Text(
-                              message['text'] ?? '',
-                              style: const TextStyle(
-                                color: Colors.white70,
-                                fontSize: 12,
+                  return ListView.builder(
+                    controller: _scrollController,
+                    reverse: false,
+                    itemCount: messages.length,
+                    itemBuilder: (context, index) {
+                      final message =
+                          messages[index].data() as Map<String, dynamic>;
+                      if (message['type'] == 'system') {
+                        // システムメッセージの表示
+                        return Container(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          child: Center(
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 8,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.grey.shade800.withOpacity(0.5),
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Text(
+                                message['text'] ?? '',
+                                style: const TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 12,
+                                ),
                               ),
                             ),
                           ),
-                        ),
+                        );
+                      }
+                      return MessageBubble(
+                        senderName: message['senderName'] ?? '？？？',
+                        text: message['text'] ?? '',
+                        isMe: message['senderId'] == _auth.currentUser?.uid,
                       );
-                    }
-                    return MessageBubble(
-                      senderName: message['senderName'] ?? '？？？',
-                      text: message['text'] ?? '',
-                      isMe: message['senderId'] == _auth.currentUser?.uid,
-                    );
-                  },
-                );
-              },
+                    },
+                  );
+                },
+              ),
             ),
           ),
 
@@ -586,6 +643,135 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         Navigator.of(context).pop();
       }
     }
+  }
+
+  Color _getPhaseColor() {
+    if (_isNightTime) return Colors.indigo.shade900;
+    if (_isVotingTime) return Colors.red.shade800;
+    return Colors.orange.shade800;
+  }
+
+  IconData _getPhaseIcon() {
+    if (_isNightTime) return Icons.nightlight_round;
+    if (_isVotingTime) return Icons.how_to_vote;
+    return Icons.wb_sunny;
+  }
+
+  String _getPhaseText() {
+    if (_isNightTime) return "夜";
+    if (_isVotingTime) return "投票";
+    return "昼";
+  }
+
+  Future<void> _startGame() async {
+    try {
+      final roomRef = _firestore.collection('rooms').doc(widget.roomId);
+      final roomDoc = await roomRef.get();
+      final roomData = roomDoc.data() as Map<String, dynamic>;
+      final players = roomData['players'] as Map<String, dynamic>;
+      final maxPlayers = roomData['maxPlayers'] as int;
+      final isStarted = roomData['isStarted'] ?? false;
+
+      print('Debug: プレイヤー数: ${players.length}, 最大プレイヤー数: $maxPlayers');
+      print('Debug: ゲーム開始状態: $isStarted');
+
+      if (players.length == maxPlayers && !isStarted) {
+        await _firestore.runTransaction((transaction) async {
+          final freshDoc = await transaction.get(roomRef);
+          if (freshDoc.data()?['isStarted'] == true) {
+            print('Debug: 他のプレイヤーによってすでにゲームが開始されています');
+            return;
+          }
+
+          print('Debug: プレイヤー数が最大に達しました');
+          final roles = _assignRoles(players.length);
+          final playerEntries = players.entries.toList();
+
+          print('Debug: 割り当てられた役職: $roles');
+
+          for (var i = 0; i < playerEntries.length; i++) {
+            transaction.update(roomRef, {
+              'players.${playerEntries[i].key}.role': roles[i],
+            });
+          }
+
+          // ゲーム開始状態とゲーム状態を設定
+          transaction.update(roomRef, {
+            'isStarted': true,
+            'gameState': {
+              'isNightTime': false,
+              'isVotingTime': false,
+              'currentDay': 1,
+              'remainingSeconds': 30,
+              'lastUpdatedAt': FieldValue.serverTimestamp(),
+            },
+          });
+
+          final messageRef = roomRef.collection('messages').doc();
+          transaction.set(messageRef, {
+            'type': 'system',
+            'text': 'ゲームが開始されました！\n☀️ 1日目の昼がはじまります',
+            'timestamp': FieldValue.serverTimestamp(),
+          });
+        });
+
+        print('Debug: ゲームを開始しました');
+      } else {
+        print('Debug: プレイヤー数が不足しているか、すでにゲームが開始されています');
+      }
+    } catch (e) {
+      print('Error starting game: $e');
+    }
+  }
+
+  List<String> _assignRoles(int playerCount) {
+    final roles = <String>[];
+    // 人狼の数を決定（プレイヤー数の約1/4）
+    final werewolfCount = (playerCount / 4).ceil();
+
+    // 人狼を追加
+    for (var i = 0; i < werewolfCount; i++) {
+      roles.add('人狼');
+    }
+
+    // 村人を追加
+    for (var i = 0; i < playerCount - werewolfCount; i++) {
+      roles.add('市民');
+    }
+
+    // 役職をシャッフル
+    roles.shuffle();
+    return roles;
+  }
+
+  Future<void> _startGameWithBatch(
+    List<MapEntry<String, dynamic>> players,
+    String roomId,
+  ) async {
+    final batch = _firestore.batch();
+
+    // 役職の割り当て
+    final roles = _assignRoles(players.length);
+    for (var i = 0; i < players.length; i++) {
+      final playerRef = _firestore.collection('rooms').doc(roomId);
+      batch.update(playerRef, {'players.${players[i].key}.role': roles[i]});
+    }
+
+    // ゲーム開始フラグを設定
+    final roomRef = _firestore.collection('rooms').doc(roomId);
+    batch.update(roomRef, {'isStarted': true});
+
+    // システムメッセージを追加
+    final messageRef = roomRef.collection('messages').doc();
+    batch.set(messageRef, {
+      'type': 'system',
+      'text': 'ゲームが開始されました！',
+      'timestamp': FieldValue.serverTimestamp(),
+    });
+
+    // 一括で更新を実行
+    await batch.commit();
+    print('Debug: ゲームを開始しました');
   }
 }
 
