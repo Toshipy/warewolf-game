@@ -32,6 +32,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   String? _votedPlayerId;
   Map<String, int> _voteResults = {};
   Set<String> _executedPlayers = {};
+  bool _isGameOver = false;
+  String? _winner;
 
   @override
   void initState() {
@@ -51,6 +53,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
             _isNightTime = gameState['isNightTime'] as bool;
             _isVotingTime = gameState['isVotingTime'] as bool;
             _currentDay = gameState['currentDay'] as int;
+            _isGameOver = gameState['isGameOver'] == true;
+            _winner = gameState['winner'] as String?;
             if (_timer == null && _isGameStarted) {
               _startTimer();
             }
@@ -64,10 +68,16 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
             }
           });
         }
-        final executed = (snapshot.data()?['executedPlayers'] as List<dynamic>?)?.cast<String>() ?? [];
+        final executed =
+            (snapshot.data()?['executedPlayers'] as List<dynamic>?)
+                ?.cast<String>() ??
+            [];
         setState(() {
           _executedPlayers = executed.toSet();
         });
+      } else {
+        // 部屋が削除された場合は画面を閉じる
+        if (mounted) Navigator.of(context).pop();
       }
     });
   }
@@ -280,6 +290,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                   '⚠️ ${executedPlayerName}が処刑されました。\n役職: $executedPlayerRole',
               'timestamp': FieldValue.serverTimestamp(),
             });
+
+        await _checkGameOver();
       }
     } catch (e) {
       print('Error processing vote results: $e');
@@ -332,7 +344,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       body: Column(
         children: [
           // タイマー表示
-          if (_isGameStarted)
+          if (_isGameStarted && !_isGameOver)
             Container(
               padding: const EdgeInsets.symmetric(vertical: 8),
               color: _getPhaseColor(),
@@ -634,13 +646,14 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                     icon: const Icon(Icons.send, color: Colors.white),
                     onPressed: _sendMessage,
                   ),
-                  TextButton(
-                    onPressed: _leaveRoom,
-                    child: Text(
-                      '退出',
-                      style: TextStyle(color: Colors.red.shade400),
+                  if (_isGameOver)
+                    TextButton(
+                      onPressed: _leaveRoom,
+                      child: Text(
+                        '退出',
+                        style: TextStyle(color: Colors.red.shade400),
+                      ),
                     ),
-                  ),
                 ],
               ),
             ),
@@ -865,6 +878,66 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     print('Debug: ゲームを開始しました');
   }
 
+  Future<void> _checkGameOver() async {
+    final roomDoc =
+        await _firestore.collection('rooms').doc(widget.roomId).get();
+    final roomData = roomDoc.data() as Map<String, dynamic>?;
+    if (roomData == null) return;
+
+    final players =
+        (roomData['players'] as Map<dynamic, dynamic>?)
+            ?.cast<String, dynamic>() ??
+        {};
+    final executedPlayers =
+        (roomData['executedPlayers'] as List<dynamic>?)?.cast<String>() ?? [];
+
+    int werewolfCount = 0;
+    int villagerCount = 0;
+
+    players.forEach((id, player) {
+      if (!executedPlayers.contains(id)) {
+        final role = player['role'] as String;
+        if (role == '人狼') {
+          werewolfCount++;
+        } else {
+          villagerCount++;
+        }
+      }
+    });
+
+    bool isGameOver = false;
+    String? winner;
+
+    if (werewolfCount == 0) {
+      isGameOver = true;
+      winner = '村人陣営の勝利';
+    } else if (werewolfCount >= villagerCount) {
+      isGameOver = true;
+      winner = '人狼陣営の勝利';
+    }
+
+    if (isGameOver) {
+      // 既存のgameStateを取得
+      final gameState = roomData['gameState'] as Map<String, dynamic>? ?? {};
+      gameState['isGameOver'] = true;
+      gameState['winner'] = winner;
+
+      await _firestore.collection('rooms').doc(widget.roomId).update({
+        'gameState': gameState,
+      });
+
+      await _firestore
+          .collection('rooms')
+          .doc(widget.roomId)
+          .collection('messages')
+          .add({
+            'type': 'system',
+            'text': 'ゲーム終了: $winner',
+            'timestamp': FieldValue.serverTimestamp(),
+          });
+    }
+  }
+
   // プレイヤー表示を更新
   Widget _buildPlayerAvatar(MapEntry<String, dynamic> player) {
     final isExecuted = _executedPlayers.contains(player.key);
@@ -921,6 +994,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     } else if (!_isNightTime && _isVotingTime) {
       // 投票結果を処理
       await _processVoteResults();
+      await _checkGameOver();
       // 投票 → 夜
       nextIsNight = true;
       nextIsVoting = false;
