@@ -90,10 +90,6 @@ class _RoomListScreenState extends State<RoomListScreen> {
                               isCreating = true;
                             });
                             try {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('部屋を作成中...')),
-                              );
-
                               DocumentReference roomRef = await _roomService
                                   .createRoom(
                                     title: titleController.text.trim(),
@@ -102,9 +98,6 @@ class _RoomListScreenState extends State<RoomListScreen> {
                                   );
 
                               Navigator.of(context).pop();
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('部屋を作成しました')),
-                              );
 
                               if (context.mounted) {
                                 Navigator.push(
@@ -274,9 +267,7 @@ class _RoomListScreenState extends State<RoomListScreen> {
 
                     // 更新ボタン
                     GestureDetector(
-                      onTap: () {
-                        _loadRooms();
-                      },
+                      onTap: _isLoading ? null : _loadRooms,
                       child: Container(
                         width: 60,
                         height: 50,
@@ -296,11 +287,21 @@ class _RoomListScreenState extends State<RoomListScreen> {
                           ),
                         ),
                         child: Center(
-                          child: Icon(
-                            Icons.refresh,
-                            color: Colors.white,
-                            size: 24,
-                          ),
+                          child:
+                              _isLoading
+                                  ? const SizedBox(
+                                    width: 24,
+                                    height: 24,
+                                    child: CircularProgressIndicator(
+                                      color: Colors.white,
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                  : const Icon(
+                                    Icons.refresh,
+                                    color: Colors.white,
+                                    size: 24,
+                                  ),
                         ),
                       ),
                     ),
@@ -392,7 +393,7 @@ class _RoomListScreenState extends State<RoomListScreen> {
             ),
             child: Center(
               child: Text(
-                '入室 ${room['playerCount']}',
+                '入室 ${room['currentPlayers']}/${room['maxPlayers']}',
                 style: TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.bold,
