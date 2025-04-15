@@ -122,6 +122,28 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
             ),
           ),
 
+          // 参加人数の表示
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8.0),
+            decoration: BoxDecoration(color: Colors.brown.shade900),
+            child: StreamBuilder<DocumentSnapshot>(
+              stream:
+                  _firestore.collection('rooms').doc(widget.roomId).snapshots(),
+              builder: (context, snapshot) {
+                if (!snapshot.hasData) return const Text('読み込み中...');
+                final roomData =
+                    snapshot.data!.data() as Map<String, dynamic>? ?? {};
+                return Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    '参加人数: ${roomData['currentPlayers'] ?? 0} / ${roomData['maxPlayers'] ?? 0}',
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                );
+              },
+            ),
+          ),
+
           // プレイヤー一覧
           Container(
             height: 80,
