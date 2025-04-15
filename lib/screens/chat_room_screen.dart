@@ -67,7 +67,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                       .collection('rooms')
                       .doc(widget.roomId)
                       .collection('messages')
-                      .orderBy('timestamp', descending: true)
+                      .orderBy('timestamp', descending: false)
                       .snapshots(),
               builder: (context, snapshot) {
                 if (snapshot.hasError) {
@@ -81,11 +81,36 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                 final messages = snapshot.data!.docs;
 
                 return ListView.builder(
-                  reverse: true,
+                  reverse: false,
                   itemCount: messages.length,
                   itemBuilder: (context, index) {
                     final message =
                         messages[index].data() as Map<String, dynamic>;
+                    if (message['type'] == 'system') {
+                      // システムメッセージの表示
+                      return Container(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: Center(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 8,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.grey.shade800.withOpacity(0.5),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Text(
+                              message['text'] ?? '',
+                              style: const TextStyle(
+                                color: Colors.white70,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    }
                     return MessageBubble(
                       senderName: message['senderName'] ?? '？？？',
                       text: message['text'] ?? '',
