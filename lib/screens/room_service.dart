@@ -78,4 +78,51 @@ class RoomService {
       rethrow;
     }
   }
+
+  Future<void> joinRoom(String roomId) async {
+    try {
+      if (_auth.currentUser == null) {
+        throw Exception('ユーザーがログインしていません');
+      }
+
+      // ユーザー情報を取得
+      final userDoc =
+          await _firestore
+              .collection('users')
+              .doc(_auth.currentUser!.uid)
+              .get();
+      final userData = userDoc.data();
+      if (userData == null) {
+        throw Exception('ユーザー情報が見つかりません');
+      }
+
+      // 部屋の情報を取得して現在の人数をチェック
+      final roomDoc = await _firestore.collection('rooms').doc(roomId).get();
+      if (!roomDoc.exists) {
+        throw Exception('部屋が存在しません');
+      }
+
+      final roomData = roomDoc.data();
+      if (roomData == null) {
+        throw Exception('部屋の情報が取得できません');
+      }
+
+      if (roomData['currentPlayers'] >= roomData['maxPlayers']) {
+        throw Exception('部屋が満員です');
+      }
+
+      // 入室処理
+      await _firestore.collection('rooms').doc(roomId).update({
+        'players.${_auth.currentUser!.uid}': {
+          'displayName': userData['displayName'],
+          'joinedAt': FieldValue.serverTimestamp(),
+          'isHost': false,
+        },
+        'currentPlayers': FieldValue.increment(1),
+      });
+    } catch (e) {
+      print('入室エラー: $e');
+      rethrow;
+    }
+  }
 }

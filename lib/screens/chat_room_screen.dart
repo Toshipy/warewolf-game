@@ -23,6 +23,30 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   String? _displayName;
 
   @override
+  void initState() {
+    super.initState();
+    _initializeDisplayName();
+  }
+
+  Future<void> _initializeDisplayName() async {
+    try {
+      final userDoc =
+          await _firestore
+              .collection('users')
+              .doc(_auth.currentUser?.uid)
+              .get();
+      if (userDoc.exists) {
+        final userData = userDoc.data();
+        setState(() {
+          _displayName = userData?['displayName'];
+        });
+      }
+    } catch (e) {
+      print('Error getting display name: $e');
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
@@ -63,7 +87,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                     final message =
                         messages[index].data() as Map<String, dynamic>;
                     return MessageBubble(
-                      senderName: message['senderName'] ?? '不明',
+                      senderName: message['senderName'] ?? '？？？',
                       text: message['text'] ?? '',
                       isMe: message['senderId'] == _auth.currentUser?.uid,
                     );
@@ -100,11 +124,25 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                         ?.cast<String, dynamic>() ??
                     {};
 
+                // プレイヤーを入室順に並び替え
+                final sortedPlayers =
+                    players.entries.toList()..sort((a, b) {
+                      final aTime =
+                          (a.value['joinedAt'] as Timestamp?)
+                              ?.millisecondsSinceEpoch ??
+                          0;
+                      final bTime =
+                          (b.value['joinedAt'] as Timestamp?)
+                              ?.millisecondsSinceEpoch ??
+                          0;
+                      return aTime.compareTo(bTime);
+                    });
+
                 return ListView.builder(
                   scrollDirection: Axis.horizontal,
-                  itemCount: players.length,
+                  itemCount: sortedPlayers.length,
                   itemBuilder: (context, index) {
-                    final player = players.entries.elementAt(index);
+                    final player = sortedPlayers[index];
                     return PlayerAvatar(
                       displayName: player.value['displayName'] ?? '？？？',
                       isHost: player.value['isHost'] ?? false,
