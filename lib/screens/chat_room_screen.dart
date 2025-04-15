@@ -20,12 +20,31 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   final TextEditingController _messageController = TextEditingController();
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
+  final ScrollController _scrollController = ScrollController();
   String? _displayName;
+  bool _isGameStarted = false;
 
   @override
   void initState() {
     super.initState();
     _initializeDisplayName();
+    _checkGameStatus();
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _scrollToBottom() {
+    if (_scrollController.hasClients) {
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
+    }
   }
 
   Future<void> _initializeDisplayName() async {
@@ -44,6 +63,129 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     } catch (e) {
       print('Error getting display name: $e');
     }
+  }
+
+  Future<void> _checkGameStatus() async {
+    _firestore.collection('rooms').doc(widget.roomId).snapshots().listen((
+      snapshot,
+    ) {
+      if (snapshot.exists) {
+        final data = snapshot.data() as Map<String, dynamic>;
+        final isStarted = data['isStarted'] ?? false;
+        if (isStarted != _isGameStarted) {
+          setState(() {
+            _isGameStarted = isStarted;
+          });
+        }
+      }
+    });
+  }
+
+  Future<void> _startGame() async {
+    try {
+      final roomRef = _firestore.collection('rooms').doc(widget.roomId);
+      final roomDoc = await roomRef.get();
+      final roomData = roomDoc.data() as Map<String, dynamic>;
+      final players = roomData['players'] as Map<String, dynamic>;
+      final maxPlayers = roomData['maxPlayers'] as int;
+      final isStarted = roomData['isStarted'] ?? false;
+
+      print('Debug: プレイヤー数: ${players.length}, 最大プレイヤー数: $maxPlayers');
+      print('Debug: ゲーム開始状態: $isStarted');
+
+      if (players.length == maxPlayers && !isStarted) {
+        // トランザクションで一括処理を行う
+        await _firestore.runTransaction((transaction) async {
+          // 再度ゲーム開始状態をチェック
+          final freshDoc = await transaction.get(roomRef);
+          if (freshDoc.data()?['isStarted'] == true) {
+            print('Debug: 他のプレイヤーによってすでにゲームが開始されています');
+            return;
+          }
+
+          print('Debug: プレイヤー数が最大に達しました');
+          // 役職の割り当て
+          final roles = _assignRoles(players.length);
+          final playerEntries = players.entries.toList();
+
+          print('Debug: 割り当てられた役職: $roles');
+
+          // 各プレイヤーに役職を割り当て
+          for (var i = 0; i < playerEntries.length; i++) {
+            transaction.update(roomRef, {
+              'players.${playerEntries[i].key}.role': roles[i],
+            });
+          }
+
+          // ゲーム開始フラグを設定
+          transaction.update(roomRef, {'isStarted': true});
+
+          // システムメッセージを追加
+          final messageRef = roomRef.collection('messages').doc();
+          transaction.set(messageRef, {
+            'type': 'system',
+            'text': 'ゲームが開始されました！',
+            'timestamp': FieldValue.serverTimestamp(),
+          });
+        });
+
+        print('Debug: ゲームを開始しました');
+      } else {
+        print('Debug: プレイヤー数が不足しているか、すでにゲームが開始されています');
+      }
+    } catch (e) {
+      print('Error starting game: $e');
+    }
+  }
+
+  List<String> _assignRoles(int playerCount) {
+    final roles = <String>[];
+    // 人狼の数を決定（プレイヤー数の約1/4）
+    final werewolfCount = (playerCount / 4).ceil();
+
+    // 人狼を追加
+    for (var i = 0; i < werewolfCount; i++) {
+      roles.add('人狼');
+    }
+
+    // 村人を追加
+    for (var i = 0; i < playerCount - werewolfCount; i++) {
+      roles.add('市民');
+    }
+
+    // 役職をシャッフル
+    roles.shuffle();
+    return roles;
+  }
+
+  Future<void> _startGameWithBatch(
+    List<MapEntry<String, dynamic>> players,
+    String roomId,
+  ) async {
+    final batch = _firestore.batch();
+
+    // 役職の割り当て
+    final roles = _assignRoles(players.length);
+    for (var i = 0; i < players.length; i++) {
+      final playerRef = _firestore.collection('rooms').doc(roomId);
+      batch.update(playerRef, {'players.${players[i].key}.role': roles[i]});
+    }
+
+    // ゲーム開始フラグを設定
+    final roomRef = _firestore.collection('rooms').doc(roomId);
+    batch.update(roomRef, {'isStarted': true});
+
+    // システムメッセージを追加
+    final messageRef = roomRef.collection('messages').doc();
+    batch.set(messageRef, {
+      'type': 'system',
+      'text': 'ゲームが開始されました！',
+      'timestamp': FieldValue.serverTimestamp(),
+    });
+
+    // 一括で更新を実行
+    await batch.commit();
+    print('Debug: ゲームを開始しました');
   }
 
   @override
@@ -80,7 +222,13 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 
                 final messages = snapshot.data!.docs;
 
+                // 新しいメッセージが来たら自動スクロール
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  _scrollToBottom();
+                });
+
                 return ListView.builder(
+                  controller: _scrollController,
                   reverse: false,
                   itemCount: messages.length,
                   itemBuilder: (context, index) {
@@ -122,27 +270,31 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
             ),
           ),
 
-          // 参加人数の表示
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8.0),
-            decoration: BoxDecoration(color: Colors.brown.shade900),
-            child: StreamBuilder<DocumentSnapshot>(
-              stream:
-                  _firestore.collection('rooms').doc(widget.roomId).snapshots(),
-              builder: (context, snapshot) {
-                if (!snapshot.hasData) return const Text('読み込み中...');
-                final roomData =
-                    snapshot.data!.data() as Map<String, dynamic>? ?? {};
-                return Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    '参加人数: ${roomData['currentPlayers'] ?? 0} / ${roomData['maxPlayers'] ?? 0}',
-                    style: const TextStyle(color: Colors.white),
-                  ),
-                );
-              },
+          // 参加人数の表示（ゲーム開始前のみ）
+          if (!_isGameStarted)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8.0),
+              decoration: BoxDecoration(color: Colors.brown.shade900),
+              child: StreamBuilder<DocumentSnapshot>(
+                stream:
+                    _firestore
+                        .collection('rooms')
+                        .doc(widget.roomId)
+                        .snapshots(),
+                builder: (context, snapshot) {
+                  if (!snapshot.hasData) return const Text('読み込み中...');
+                  final roomData =
+                      snapshot.data!.data() as Map<String, dynamic>? ?? {};
+                  return Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      '参加人数: ${roomData['currentPlayers'] ?? 0} / ${roomData['maxPlayers'] ?? 0}',
+                      style: const TextStyle(color: Colors.white),
+                    ),
+                  );
+                },
+              ),
             ),
-          ),
 
           // プレイヤー一覧
           Container(
@@ -153,50 +305,158 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                 top: BorderSide(color: Colors.amber.shade900, width: 2),
               ),
             ),
-            child: StreamBuilder<DocumentSnapshot>(
-              stream:
-                  _firestore.collection('rooms').doc(widget.roomId).snapshots(),
-              builder: (context, snapshot) {
-                if (!snapshot.hasData) {
-                  return const Center(child: CircularProgressIndicator());
-                }
+            child: Row(
+              children: [
+                // スクロール可能なプレイヤーリスト
+                Expanded(
+                  child: StreamBuilder<DocumentSnapshot>(
+                    stream:
+                        _firestore
+                            .collection('rooms')
+                            .doc(widget.roomId)
+                            .snapshots(),
+                    builder: (context, snapshot) {
+                      if (!snapshot.hasData) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
 
-                final roomData = snapshot.data!.data() as Map<String, dynamic>?;
-                if (roomData == null) {
-                  return const Center(child: Text('部屋の情報がありません'));
-                }
+                      final roomData =
+                          snapshot.data!.data() as Map<String, dynamic>?;
+                      if (roomData == null) {
+                        return const Center(child: Text('部屋の情報がありません'));
+                      }
 
-                final players =
-                    (roomData['players'] as Map<dynamic, dynamic>?)
-                        ?.cast<String, dynamic>() ??
-                    {};
+                      final players =
+                          (roomData['players'] as Map<dynamic, dynamic>?)
+                              ?.cast<String, dynamic>() ??
+                          {};
 
-                // プレイヤーを入室順に並び替え
-                final sortedPlayers =
-                    players.entries.toList()..sort((a, b) {
-                      final aTime =
-                          (a.value['joinedAt'] as Timestamp?)
-                              ?.millisecondsSinceEpoch ??
-                          0;
-                      final bTime =
-                          (b.value['joinedAt'] as Timestamp?)
-                              ?.millisecondsSinceEpoch ??
-                          0;
-                      return aTime.compareTo(bTime);
-                    });
+                      // プレイヤーを入室順に並び替え
+                      final sortedPlayers =
+                          players.entries.toList()..sort((a, b) {
+                            final aTime =
+                                (a.value['joinedAt'] as Timestamp?)
+                                    ?.millisecondsSinceEpoch ??
+                                0;
+                            final bTime =
+                                (b.value['joinedAt'] as Timestamp?)
+                                    ?.millisecondsSinceEpoch ??
+                                0;
+                            return aTime.compareTo(bTime);
+                          });
 
-                return ListView.builder(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: sortedPlayers.length,
-                  itemBuilder: (context, index) {
-                    final player = sortedPlayers[index];
-                    return PlayerAvatar(
-                      displayName: player.value['displayName'] ?? '？？？',
-                      isHost: player.value['isHost'] ?? false,
-                    );
-                  },
-                );
-              },
+                      // ゲーム開始条件をチェック
+                      final isHost =
+                          roomData['players'][_auth
+                              .currentUser
+                              ?.uid]?['isHost'] ==
+                          true;
+                      if (!_isGameStarted &&
+                          sortedPlayers.length ==
+                              (roomData['maxPlayers'] as int) &&
+                          isHost &&
+                          !(roomData['isStarted'] ?? false)) {
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          _startGame();
+                        });
+                      }
+
+                      return ListView.builder(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: sortedPlayers.length,
+                        itemBuilder: (context, index) {
+                          final player = sortedPlayers[index];
+                          return Container(
+                            width: 60,
+                            margin: const EdgeInsets.symmetric(horizontal: 4),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                CircleAvatar(
+                                  backgroundColor: Colors.brown.shade900,
+                                  child: Text(
+                                    player.value['displayName']
+                                            ?.toString()
+                                            .characters
+                                            .first ??
+                                        '?',
+                                    style: const TextStyle(color: Colors.white),
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  player.value['displayName'] ?? '？？？',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 12,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      );
+                    },
+                  ),
+                ),
+                // 役職表示（右側固定）
+                if (_isGameStarted)
+                  StreamBuilder<DocumentSnapshot>(
+                    stream:
+                        _firestore
+                            .collection('rooms')
+                            .doc(widget.roomId)
+                            .snapshots(),
+                    builder: (context, snapshot) {
+                      if (!snapshot.hasData) return const SizedBox.shrink();
+
+                      final roomData =
+                          snapshot.data!.data() as Map<String, dynamic>?;
+                      if (roomData == null) return const SizedBox.shrink();
+
+                      final currentUserRole =
+                          roomData['players'][_auth.currentUser?.uid]?['role']
+                              as String?;
+                      if (currentUserRole == null)
+                        return const SizedBox.shrink();
+
+                      return Container(
+                        width: 80,
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        decoration: BoxDecoration(
+                          border: Border(
+                            left: BorderSide(
+                              color: Colors.amber.shade900,
+                              width: 2,
+                            ),
+                          ),
+                        ),
+                        child: Center(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.brown.shade700,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              currentUserRole,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+              ],
             ),
           ),
 
@@ -346,8 +606,7 @@ class MessageBubble extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.all(8.0),
       child: Column(
-        crossAxisAlignment:
-            isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             senderName,
@@ -371,35 +630,65 @@ class MessageBubble extends StatelessWidget {
 class PlayerAvatar extends StatelessWidget {
   final String displayName;
   final bool isHost;
+  final String? role;
+  final bool isCurrentUser;
 
   const PlayerAvatar({
     super.key,
     required this.displayName,
     required this.isHost,
+    this.role,
+    required this.isCurrentUser,
   });
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 60,
+      width: 80,
       margin: const EdgeInsets.symmetric(horizontal: 4),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
+      child: Stack(
+        alignment: Alignment.center,
         children: [
-          CircleAvatar(
-            backgroundColor: Colors.brown.shade900,
-            child: Text(
-              displayName.characters.first,
-              style: const TextStyle(color: Colors.white),
+          // プレイヤー名とアバター
+          Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircleAvatar(
+                backgroundColor: Colors.brown.shade900,
+                child: Text(
+                  displayName.characters.first,
+                  style: const TextStyle(color: Colors.white),
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                displayName,
+                style: const TextStyle(color: Colors.white, fontSize: 12),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+          // 役職表示（右側に重ねて表示）
+          if (isCurrentUser && role != null)
+            Positioned(
+              right: 0,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                decoration: BoxDecoration(
+                  color: Colors.brown.shade700,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  role!,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
             ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            displayName,
-            style: const TextStyle(color: Colors.white, fontSize: 12),
-            maxLines: 1,
-            // overflow: TextOverflow.ellipsis,
-          ),
         ],
       ),
     );
