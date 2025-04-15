@@ -235,7 +235,26 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       final currentPlayer = players[_auth.currentUser?.uid];
 
       if (currentPlayer?['isHost'] == true) {
-        // ホストの場合、部屋全体を削除
+        // ホストの場合、他のプレイヤーがいるかチェック
+        final otherPlayers =
+            players.entries
+                .where((entry) => entry.key != _auth.currentUser?.uid)
+                .toList();
+
+        if (otherPlayers.isNotEmpty) {
+          // 他のプレイヤーがいる場合は退出できない
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('他のプレイヤーがいる場合、ホストは退出できません'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+          return;
+        }
+
+        // 他のプレイヤーがいない場合は部屋を削除
         await _firestore.collection('rooms').doc(widget.roomId).delete();
       } else {
         // 一般プレイヤーの場合、プレイヤーのみを削除
