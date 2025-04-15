@@ -305,66 +305,158 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                 top: BorderSide(color: Colors.amber.shade900, width: 2),
               ),
             ),
-            child: StreamBuilder<DocumentSnapshot>(
-              stream:
-                  _firestore.collection('rooms').doc(widget.roomId).snapshots(),
-              builder: (context, snapshot) {
-                if (!snapshot.hasData) {
-                  return const Center(child: CircularProgressIndicator());
-                }
+            child: Row(
+              children: [
+                // スクロール可能なプレイヤーリスト
+                Expanded(
+                  child: StreamBuilder<DocumentSnapshot>(
+                    stream:
+                        _firestore
+                            .collection('rooms')
+                            .doc(widget.roomId)
+                            .snapshots(),
+                    builder: (context, snapshot) {
+                      if (!snapshot.hasData) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
 
-                final roomData = snapshot.data!.data() as Map<String, dynamic>?;
-                if (roomData == null) {
-                  return const Center(child: Text('部屋の情報がありません'));
-                }
+                      final roomData =
+                          snapshot.data!.data() as Map<String, dynamic>?;
+                      if (roomData == null) {
+                        return const Center(child: Text('部屋の情報がありません'));
+                      }
 
-                final players =
-                    (roomData['players'] as Map<dynamic, dynamic>?)
-                        ?.cast<String, dynamic>() ??
-                    {};
+                      final players =
+                          (roomData['players'] as Map<dynamic, dynamic>?)
+                              ?.cast<String, dynamic>() ??
+                          {};
 
-                // プレイヤーを入室順に並び替え
-                final sortedPlayers =
-                    players.entries.toList()..sort((a, b) {
-                      final aTime =
-                          (a.value['joinedAt'] as Timestamp?)
-                              ?.millisecondsSinceEpoch ??
-                          0;
-                      final bTime =
-                          (b.value['joinedAt'] as Timestamp?)
-                              ?.millisecondsSinceEpoch ??
-                          0;
-                      return aTime.compareTo(bTime);
-                    });
+                      // プレイヤーを入室順に並び替え
+                      final sortedPlayers =
+                          players.entries.toList()..sort((a, b) {
+                            final aTime =
+                                (a.value['joinedAt'] as Timestamp?)
+                                    ?.millisecondsSinceEpoch ??
+                                0;
+                            final bTime =
+                                (b.value['joinedAt'] as Timestamp?)
+                                    ?.millisecondsSinceEpoch ??
+                                0;
+                            return aTime.compareTo(bTime);
+                          });
 
-                // ゲーム開始条件をチェック
-                final isHost =
-                    roomData['players'][_auth.currentUser?.uid]?['isHost'] ==
-                    true;
-                if (!_isGameStarted &&
-                    sortedPlayers.length == (roomData['maxPlayers'] as int) &&
-                    isHost &&
-                    !(roomData['isStarted'] ?? false)) {
-                  // 非同期処理を遅延実行
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    _startGame();
-                  });
-                }
+                      // ゲーム開始条件をチェック
+                      final isHost =
+                          roomData['players'][_auth
+                              .currentUser
+                              ?.uid]?['isHost'] ==
+                          true;
+                      if (!_isGameStarted &&
+                          sortedPlayers.length ==
+                              (roomData['maxPlayers'] as int) &&
+                          isHost &&
+                          !(roomData['isStarted'] ?? false)) {
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          _startGame();
+                        });
+                      }
 
-                return ListView.builder(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: sortedPlayers.length,
-                  itemBuilder: (context, index) {
-                    final player = sortedPlayers[index];
-                    return PlayerAvatar(
-                      displayName: player.value['displayName'] ?? '？？？',
-                      isHost: player.value['isHost'] ?? false,
-                      role: player.value['role'],
-                      isCurrentUser: player.key == _auth.currentUser?.uid,
-                    );
-                  },
-                );
-              },
+                      return ListView.builder(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: sortedPlayers.length,
+                        itemBuilder: (context, index) {
+                          final player = sortedPlayers[index];
+                          return Container(
+                            width: 60,
+                            margin: const EdgeInsets.symmetric(horizontal: 4),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                CircleAvatar(
+                                  backgroundColor: Colors.brown.shade900,
+                                  child: Text(
+                                    player.value['displayName']
+                                            ?.toString()
+                                            .characters
+                                            .first ??
+                                        '?',
+                                    style: const TextStyle(color: Colors.white),
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  player.value['displayName'] ?? '？？？',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 12,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      );
+                    },
+                  ),
+                ),
+                // 役職表示（右側固定）
+                if (_isGameStarted)
+                  StreamBuilder<DocumentSnapshot>(
+                    stream:
+                        _firestore
+                            .collection('rooms')
+                            .doc(widget.roomId)
+                            .snapshots(),
+                    builder: (context, snapshot) {
+                      if (!snapshot.hasData) return const SizedBox.shrink();
+
+                      final roomData =
+                          snapshot.data!.data() as Map<String, dynamic>?;
+                      if (roomData == null) return const SizedBox.shrink();
+
+                      final currentUserRole =
+                          roomData['players'][_auth.currentUser?.uid]?['role']
+                              as String?;
+                      if (currentUserRole == null)
+                        return const SizedBox.shrink();
+
+                      return Container(
+                        width: 80,
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        decoration: BoxDecoration(
+                          border: Border(
+                            left: BorderSide(
+                              color: Colors.amber.shade900,
+                              width: 2,
+                            ),
+                          ),
+                        ),
+                        child: Center(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.brown.shade700,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              currentUserRole,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+              ],
             ),
           ),
 
@@ -552,33 +644,51 @@ class PlayerAvatar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 60,
+      width: 80,
       margin: const EdgeInsets.symmetric(horizontal: 4),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
+      child: Stack(
+        alignment: Alignment.center,
         children: [
+          // プレイヤー名とアバター
+          Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircleAvatar(
+                backgroundColor: Colors.brown.shade900,
+                child: Text(
+                  displayName.characters.first,
+                  style: const TextStyle(color: Colors.white),
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                displayName,
+                style: const TextStyle(color: Colors.white, fontSize: 12),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+          // 役職表示（右側に重ねて表示）
           if (isCurrentUser && role != null)
-            Text(
-              role!,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
+            Positioned(
+              right: 0,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                decoration: BoxDecoration(
+                  color: Colors.brown.shade700,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  role!,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
               ),
             ),
-          CircleAvatar(
-            backgroundColor: Colors.brown.shade900,
-            child: Text(
-              displayName.characters.first,
-              style: const TextStyle(color: Colors.white),
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            displayName,
-            style: const TextStyle(color: Colors.white, fontSize: 12),
-            maxLines: 1,
-          ),
         ],
       ),
     );
