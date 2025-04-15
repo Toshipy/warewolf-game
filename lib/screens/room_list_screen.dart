@@ -387,6 +387,26 @@ class _RoomListScreenState extends State<RoomListScreen> {
       ),
       child: Column(
         children: [
+          // 部屋のタイトル
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 15),
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(color: Colors.amber.shade900, width: 1),
+              ),
+            ),
+            child: Text(
+              room['title'] ?? '誰でも歓迎',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ),
+
           // 役職ボタン一覧
           Container(
             padding: const EdgeInsets.symmetric(vertical: 10),
