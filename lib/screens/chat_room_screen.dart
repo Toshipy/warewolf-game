@@ -168,6 +168,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                       hintStyle: TextStyle(color: Colors.white70),
                       border: InputBorder.none,
                     ),
+                    onSubmitted: (text) {
+                      if (text.trim().isNotEmpty) {
+                        _sendMessage();
+                      }
+                    },
                   ),
                 ),
                 IconButton(
