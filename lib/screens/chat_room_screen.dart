@@ -29,7 +29,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   bool _isNightTime = false;
   bool _isVotingTime = false;
   int _currentDay = 1;
-String? _votedPlayerId;
+  String? _votedPlayerId;
   Map<String, int> _voteResults = {};
   Set<String> _executedPlayers = {};
 
@@ -38,7 +38,7 @@ String? _votedPlayerId;
     super.initState();
     _initializeDisplayName();
     _checkGameStatus();
-    // ゲーム状態の監視を開始
+    // ゲーム状態と処刑プレイヤーの監視を開始
     _firestore.collection('rooms').doc(widget.roomId).snapshots().listen((
       snapshot,
     ) {
@@ -56,6 +56,10 @@ String? _votedPlayerId;
             }
           });
         }
+        final executed = (snapshot.data()?['executedPlayers'] as List<dynamic>?)?.cast<String>() ?? [];
+        setState(() {
+          _executedPlayers = executed.toSet();
+        });
       }
     });
   }
