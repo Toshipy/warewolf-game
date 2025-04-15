@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'dart:async';
+import 'dart:math';
 
 class ChatRoomScreen extends StatefulWidget {
   final String roomId;
@@ -55,16 +56,15 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
             _currentDay = gameState['currentDay'] as int;
             _isGameOver = gameState['isGameOver'] == true;
             _winner = gameState['winner'] as String?;
-            if (_timer == null && _isGameStarted) {
-              _startTimer();
-            }
-            // 残り秒数をFirestoreの値から計算
             final lastUpdatedAt = gameState['lastUpdatedAt'] as Timestamp?;
             final remaining = gameState['remainingSeconds'] as int;
             if (lastUpdatedAt != null && remaining > 0) {
               final now = Timestamp.now();
               final elapsed = now.seconds - lastUpdatedAt.seconds;
               _remainingSeconds = (remaining - elapsed).clamp(0, 999);
+            }
+            if (_isHost && _timer == null && _isGameStarted) {
+              _startTimer();
             }
           });
         }
@@ -213,6 +213,14 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                   ),
                 ],
               ),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                  },
+                  child: Text('閉じる'),
+                ),
+              ],
             );
           },
         );
@@ -253,13 +261,22 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 
       // 最多得票者を特定
       int maxVotes = 0;
-      String? executedPlayerId;
+      List<String> candidates = [];
       voteCount.forEach((playerId, count) {
         if (count > maxVotes) {
           maxVotes = count;
-          executedPlayerId = playerId;
+          candidates = [playerId];
+        } else if (count == maxVotes) {
+          candidates.add(playerId);
         }
       });
+
+      // 同数の場合ランダムで１人を選ぶ
+      String? executedPlayerId;
+      if (candidates.isNotEmpty) {
+        final random = Random();
+        executedPlayerId = candidates[random.nextInt(candidates.length)];
+      }
 
       if (executedPlayerId != null) {
         final players =
@@ -286,8 +303,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
             .collection('messages')
             .add({
               'type': 'system',
-              'text':
-                  '⚠️ ${executedPlayerName}が処刑されました。\n役職: $executedPlayerRole',
+              'text': '⚠️ ${executedPlayerName}が処刑されました。',
               'timestamp': FieldValue.serverTimestamp(),
             });
 
@@ -646,14 +662,25 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                     icon: const Icon(Icons.send, color: Colors.white),
                     onPressed: _sendMessage,
                   ),
-                  if (_isGameOver)
-                    TextButton(
-                      onPressed: _leaveRoom,
-                      child: Text(
-                        '退出',
-                        style: TextStyle(color: Colors.red.shade400),
-                      ),
+                ],
+              ),
+            ),
+
+          // ゲーム終了時は必ず退出ボタンを表示
+          if (_isGameOver)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8.0),
+              decoration: BoxDecoration(color: Colors.brown.shade900),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: _leaveRoom,
+                    child: Text(
+                      '退出',
+                      style: TextStyle(color: Colors.red.shade400),
                     ),
+                  ),
                 ],
               ),
             ),
@@ -917,6 +944,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     }
 
     if (isGameOver) {
+      _timer?.cancel();
       // 既存のgameStateを取得
       final gameState = roomData['gameState'] as Map<String, dynamic>? ?? {};
       gameState['isGameOver'] = true;
@@ -983,6 +1011,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   }
 
   void _switchPhase() async {
+    if (_isGameOver) return;
+
     bool nextIsNight = _isNightTime;
     bool nextIsVoting = _isVotingTime;
     int nextDay = _currentDay;
@@ -1038,6 +1068,14 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 
     // 新しいタイマーを開始
     _startTimer();
+  }
+
+  bool get _isHost {
+    final userId = _auth.currentUser?.uid;
+    // プレイヤー情報をどこかで保持している場合
+    // 例: return _players[userId]?['isHost'] == true;
+    // ここではFirestoreから都度取得してもOK
+    // 例: return (roomData['players'][userId]?['isHost'] ?? false) == true;
   }
 }
 
