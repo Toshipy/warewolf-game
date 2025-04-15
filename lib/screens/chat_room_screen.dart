@@ -20,6 +20,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   final TextEditingController _messageController = TextEditingController();
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
+  String? _displayName;
 
   @override
   Widget build(BuildContext context) {
@@ -105,7 +106,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                   itemBuilder: (context, index) {
                     final player = players.entries.elementAt(index);
                     return PlayerAvatar(
-                      name: player.value['name'] ?? '名無し',
+                      displayName: player.value['displayName'] ?? '？？？',
                       isHost: player.value['isHost'] ?? false,
                     );
                   },
@@ -161,7 +162,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
           .add({
             'text': _messageController.text.trim(),
             'senderId': _auth.currentUser?.uid,
-            'senderName': _auth.currentUser?.displayName ?? '名無しさん',
+            'senderName': _displayName ?? '？？？',
             'timestamp': FieldValue.serverTimestamp(),
           });
 
@@ -259,10 +260,14 @@ class MessageBubble extends StatelessWidget {
 }
 
 class PlayerAvatar extends StatelessWidget {
-  final String name;
+  final String displayName;
   final bool isHost;
 
-  const PlayerAvatar({super.key, required this.name, required this.isHost});
+  const PlayerAvatar({
+    super.key,
+    required this.displayName,
+    required this.isHost,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -273,18 +278,18 @@ class PlayerAvatar extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           CircleAvatar(
-            backgroundColor: isHost ? Colors.amber : Colors.grey,
+            backgroundColor: Colors.brown.shade900,
             child: Text(
-              name.characters.first,
+              displayName.characters.first,
               style: const TextStyle(color: Colors.white),
             ),
           ),
           const SizedBox(height: 4),
           Text(
-            name,
+            displayName,
             style: const TextStyle(color: Colors.white, fontSize: 12),
             maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+            // overflow: TextOverflow.ellipsis,
           ),
         ],
       ),
