@@ -26,7 +26,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   String? _displayName;
   bool _isGameStarted = false;
   Timer? _timer;
-  int _remainingSeconds = 30;
+  int _remainingSeconds = 5;
   bool _isNightTime = false;
   bool _isVotingTime = false;
   int _currentDay = 1;
@@ -35,6 +35,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   Set<String> _executedPlayers = {};
   bool _isGameOver = false;
   String? _winner;
+  DateTime? _timerBaseTime;
+  int? _timerBaseRemaining;
 
   @override
   void initState() {
@@ -60,11 +62,13 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
             final lastUpdatedAt = gameState['lastUpdatedAt'] as Timestamp?;
             final remaining = gameState['remainingSeconds'] as int;
             if (lastUpdatedAt != null && remaining > 0) {
-              final now = Timestamp.now();
-              final elapsed = now.seconds - lastUpdatedAt.seconds;
-              _remainingSeconds = (remaining - elapsed).clamp(0, 999);
+              _timerBaseTime = lastUpdatedAt.toDate();
+              _timerBaseRemaining = remaining;
+              _startLocalDisplayTimer();
             }
-            if (isHost && _timer == null && _isGameStarted) {
+            if (_isGameOver) {
+              _timer?.cancel();
+            } else if (isHost && _timer == null && _isGameStarted) {
               _startTimer();
             }
           });
@@ -94,7 +98,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     if (_scrollController.hasClients) {
       _scrollController.animateTo(
         _scrollController.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 300),
+        duration: const Duration(milliseconds: 100),
         curve: Curves.easeOut,
       );
     }
@@ -135,29 +139,17 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   }
 
   void _startTimer() {
+    if (_isGameOver) return;
     _timer?.cancel();
-
-    // Firestoreにタイマーの初期状態を設定
-    _firestore.collection('rooms').doc(widget.roomId).update({
-      'gameState': {
-        'isNightTime': _isNightTime,
-        'isVotingTime': _isVotingTime,
-        'currentDay': _currentDay,
-        'remainingSeconds': _getPhaseSeconds(),
-        'lastUpdatedAt': FieldValue.serverTimestamp(),
-      },
-    });
-
-    // ローカルのタイマーを開始
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       _updateTimer();
     });
   }
 
   int _getPhaseSeconds() {
-    if (_isNightTime) return 10; // 夜時間: 10秒
-    if (_isVotingTime) return 10; // 投票時間: 10秒
-    return 30; // 話し合い時間: 30秒
+    if (_isNightTime) return 5; // 夜時間: 10秒
+    if (_isVotingTime) return 5; // 投票時間: 10秒
+    return 5; // 話し合い時間: 30秒
   }
 
   void _showVotingDialog() {
@@ -645,8 +637,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
               ),
             ),
 
-          // メッセージ入力エリア（処刑されたプレイヤーは入力不可）
-          if (!_executedPlayers.contains(_auth.currentUser?.uid))
+          // メッセージ入力エリア（ゲーム終了時は非表示）
+          if (!_executedPlayers.contains(_auth.currentUser?.uid) &&
+              !_isGameOver)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8.0),
               decoration: BoxDecoration(color: Colors.brown.shade900),
@@ -676,7 +669,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
               ),
             ),
 
-          // ゲーム終了時は必ず退出ボタンを表示
+          // ゲーム終了時は必ず全員に退出ボタンを表示
           if (_isGameOver)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8.0),
@@ -843,7 +836,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
               'isNightTime': false,
               'isVotingTime': false,
               'currentDay': 1,
-              'remainingSeconds': 30,
+              'remainingSeconds': 5,
               'lastUpdatedAt': FieldValue.serverTimestamp(),
             },
           });
@@ -1086,6 +1079,27 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         await _firestore.collection('rooms').doc(widget.roomId).get();
     final roomData = roomDoc.data() as Map<String, dynamic>?;
     return (roomData?['players'][userId]?['isHost'] ?? false) == true;
+  }
+
+  void _startLocalDisplayTimer() {
+    _timer?.cancel();
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) async {
+      if (_timerBaseTime != null && _timerBaseRemaining != null) {
+        final now = DateTime.now();
+        final elapsed = now.difference(_timerBaseTime!).inSeconds;
+        final displaySeconds = (_timerBaseRemaining! - elapsed).clamp(0, 999);
+        setState(() {
+          _remainingSeconds = displaySeconds;
+        });
+        if (displaySeconds <= 0) {
+          _timer?.cancel();
+
+          if (await _isHost()) {
+            _switchPhase();
+          }
+        }
+      }
+    });
   }
 }
 
