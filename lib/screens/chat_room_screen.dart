@@ -243,85 +243,81 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   }
 
   Future<void> _processVoteResults() async {
-    try {
-      final roomDoc =
-          await _firestore.collection('rooms').doc(widget.roomId).get();
-      final roomData = roomDoc.data() as Map<String, dynamic>?;
-      if (roomData == null) return;
+    print('Debug: 投票結果の処理を開始します');
+    final roomDoc =
+        await _firestore.collection('rooms').doc(widget.roomId).get();
+    final roomData = roomDoc.data() as Map<String, dynamic>?;
+    if (roomData == null) return;
 
-      final votes =
-          (roomData['votes'] as Map<dynamic, dynamic>?)
-              ?.cast<String, String>() ??
+    final votes =
+        (roomData['votes'] as Map<dynamic, dynamic>?)?.cast<String, String>() ??
+        {};
+    print('Debug: 投票データ: $votes');
+
+    // 得票数を集計
+    final Map<String, int> voteCount = {};
+    votes.forEach((voterId, targetId) {
+      voteCount[targetId] = (voteCount[targetId] ?? 0) + 1;
+    });
+    print('Debug: 得票数集計: $voteCount');
+
+    // 最多得票者を特定
+    String? executedPlayerId;
+    int maxVotes = 0;
+    voteCount.forEach((String playerId, int count) {
+      if (count > maxVotes) {
+        maxVotes = count;
+        executedPlayerId = playerId;
+      }
+    });
+    print('Debug: 最多得票者ID: $executedPlayerId (得票数: $maxVotes)');
+
+    if (executedPlayerId != null) {
+      // 処刑されたプレイヤーの名前を取得
+      final players =
+          (roomData['players'] as Map<dynamic, dynamic>?)
+              ?.cast<String, dynamic>() ??
           {};
-      final voteCount = <String, int>{};
+      final executedPlayerName =
+          players[executedPlayerId]?['displayName'] ?? '不明なプレイヤー';
+      print('Debug: 処刑されたプレイヤー名: $executedPlayerName');
 
-      // 投票を集計
-      votes.values.forEach((targetId) {
-        voteCount[targetId] = (voteCount[targetId] ?? 0) + 1;
+      // 投票詳細メッセージを作成
+      final voteDetails = votes.entries
+          .map((entry) {
+            final voterName = players[entry.key]?['displayName'] ?? '不明';
+            final targetName = players[entry.value]?['displayName'] ?? '不明';
+            return '$voterName → $targetName';
+          })
+          .join('\n');
+
+      // 処刑リストに追加
+      final List<String> executedPlayers =
+          (roomData['executedPlayers'] as List<dynamic>?)?.cast<String>() ?? [];
+      executedPlayers.add(executedPlayerId as String);
+
+      // Firestoreを更新
+      await _firestore.collection('rooms').doc(widget.roomId).update({
+        'executedPlayers': executedPlayers,
+        'votes': {}, // 投票をリセット
       });
+      print('Debug: Firestoreの更新が完了しました');
 
-      // 最多得票者を特定
-      int maxVotes = 0;
-      List<String> candidates = [];
-      voteCount.forEach((playerId, count) {
-        if (count > maxVotes) {
-          maxVotes = count;
-          candidates = [playerId];
-        } else if (count == maxVotes) {
-          candidates.add(playerId);
-        }
-      });
+      // システムメッセージを追加
+      await _firestore
+          .collection('rooms')
+          .doc(widget.roomId)
+          .collection('messages')
+          .add({
+            'type': 'system',
+            'text': '⚠️ ${executedPlayerName}が処刑されました。\n\n投票結果:\n$voteDetails',
+            'timestamp': FieldValue.serverTimestamp(),
+          });
+      print('Debug: 処刑メッセージを送信しました');
 
-      // 同数の場合ランダムで１人を選ぶ
-      String? executedPlayerId;
-      if (candidates.isNotEmpty) {
-        final random = Random();
-        executedPlayerId = candidates[random.nextInt(candidates.length)];
-      }
-
-      if (executedPlayerId != null) {
-        final players =
-            (roomData['players'] as Map<dynamic, dynamic>?)
-                ?.cast<String, dynamic>() ??
-            {};
-        final executedPlayerName =
-            players[executedPlayerId]?['displayName'] ?? '不明';
-        final executedPlayerRole = players[executedPlayerId]?['role'] ?? '不明';
-
-        // 処刑されたプレイヤーを記録
-        _executedPlayers.add(executedPlayerId!);
-
-        // 処刑結果を保存
-        await _firestore.collection('rooms').doc(widget.roomId).update({
-          'executedPlayers': FieldValue.arrayUnion([executedPlayerId]),
-          'votes': {}, // 投票をリセット
-        });
-
-        // 投票詳細メッセージを作成
-        final voteDetails = votes.entries
-            .map((entry) {
-              final voterName = players[entry.key]?['displayName'] ?? '不明';
-              final targetName = players[entry.value]?['displayName'] ?? '不明';
-              return '$voterName -> $targetName';
-            })
-            .join('\n');
-
-        // システムメッセージを送信
-        await _firestore
-            .collection('rooms')
-            .doc(widget.roomId)
-            .collection('messages')
-            .add({
-              'type': 'system',
-              'text':
-                  '⚠️ ${executedPlayerName}が処刑されました。\n\n投票結果:\n$voteDetails',
-              'timestamp': FieldValue.serverTimestamp(),
-            });
-
-        await _checkGameOver();
-      }
-    } catch (e) {
-      print('Error processing vote results: $e');
+      // ゲーム終了判定
+      print('Debug: ゲーム終了判定を開始します');
+      await _checkGameOver();
     }
   }
 
@@ -948,16 +944,24 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       }
     });
 
+    print('Debug: 生存中の人狼数: $werewolfCount');
+    print('Debug: 生存中の村人数: $villagerCount');
+
     bool isGameOver = false;
     String? winner;
 
     if (werewolfCount == 0) {
       isGameOver = true;
       winner = '村人陣営の勝利';
+      print('Debug: 人狼が全滅したため、村人陣営の勝利');
     } else if (werewolfCount >= villagerCount) {
       isGameOver = true;
       winner = '人狼陣営の勝利';
+      print('Debug: 人狼が村人以上の数になったため、人狼陣営の勝利');
     }
+
+    print('Debug: ゲーム終了判定: $isGameOver');
+    print('Debug: 勝者: $winner');
 
     if (isGameOver) {
       _timer?.cancel();
@@ -966,6 +970,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       gameState['isGameOver'] = true;
       gameState['winner'] = winner;
 
+      print('Debug: Firestoreにゲーム終了状態を保存します');
       await _firestore.collection('rooms').doc(widget.roomId).update({
         'gameState': gameState,
       });
@@ -979,6 +984,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
             'text': 'ゲーム終了: $winner',
             'timestamp': FieldValue.serverTimestamp(),
           });
+      print('Debug: ゲーム終了メッセージを送信しました');
     }
   }
 
@@ -1040,7 +1046,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     } else if (!_isNightTime && _isVotingTime) {
       // 投票結果を処理
       await _processVoteResults();
-      await _checkGameOver();
+      // ゲーム終了判定は_processVoteResults内で行われるため、ここでは不要
+      if (_isGameOver) return; // ゲームが終了していたら、これ以上処理しない
       // 投票 → 夜
       nextIsNight = true;
       nextIsVoting = false;
