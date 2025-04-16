@@ -44,10 +44,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     // ゲーム状態と処刑プレイヤーの監視を開始
     _firestore.collection('rooms').doc(widget.roomId).snapshots().listen((
       snapshot,
-    ) {
+    ) async {
       if (snapshot.exists) {
         final gameState =
             (snapshot.data()?['gameState'] ?? {}) as Map<String, dynamic>;
+        bool isHost = await _isHost(); // 先にawaitで取得
         if (gameState.isNotEmpty) {
           setState(() {
             _isGameStarted = snapshot.data()?['isStarted'] ?? false;
@@ -63,7 +64,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
               final elapsed = now.seconds - lastUpdatedAt.seconds;
               _remainingSeconds = (remaining - elapsed).clamp(0, 999);
             }
-            if (_isHost && _timer == null && _isGameStarted) {
+            if (isHost && _timer == null && _isGameStarted) {
               _startTimer();
             }
           });
@@ -330,8 +331,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 
       if (remainingSeconds <= 0) {
         _timer?.cancel();
-        if (roomDoc.data()?['players'][_auth.currentUser?.uid]?['isHost'] ==
-            true) {
+        if (await _isHost()) {
           _switchPhase();
         }
       } else {
@@ -1070,12 +1070,12 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     _startTimer();
   }
 
-  bool get _isHost {
+  Future<bool> _isHost() async {
     final userId = _auth.currentUser?.uid;
-    // プレイヤー情報をどこかで保持している場合
-    // 例: return _players[userId]?['isHost'] == true;
-    // ここではFirestoreから都度取得してもOK
-    // 例: return (roomData['players'][userId]?['isHost'] ?? false) == true;
+    final roomDoc =
+        await _firestore.collection('rooms').doc(widget.roomId).get();
+    final roomData = roomDoc.data() as Map<String, dynamic>?;
+    return (roomData?['players'][userId]?['isHost'] ?? false) == true;
   }
 }
 
