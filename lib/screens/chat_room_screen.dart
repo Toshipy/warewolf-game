@@ -51,14 +51,19 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         final gameState =
             (snapshot.data()?['gameState'] ?? {}) as Map<String, dynamic>;
         bool isHost = await _isHost(); // 先にawaitで取得
+
         if (gameState.isNotEmpty) {
           setState(() {
+            // 最初に_isGameOverを更新
+            _isGameOver = gameState['isGameOver'] == true;
+            _winner = gameState['winner'] as String?;
+
+            // その後で他の状態を更新
             _isGameStarted = snapshot.data()?['isStarted'] ?? false;
             _isNightTime = gameState['isNightTime'] as bool;
             _isVotingTime = gameState['isVotingTime'] as bool;
             _currentDay = gameState['currentDay'] as int;
-            _isGameOver = gameState['isGameOver'] == true;
-            _winner = gameState['winner'] as String?;
+
             final lastUpdatedAt = gameState['lastUpdatedAt'] as Timestamp?;
             final remaining = gameState['remainingSeconds'] as int;
             if (lastUpdatedAt != null && remaining > 0) {
@@ -95,10 +100,13 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   }
 
   void _scrollToBottom() {
-    if (_scrollController.hasClients) {
+    if (!_scrollController.hasClients) return;
+    final threshold = 100.0;
+    final position = _scrollController.position;
+    if (position.maxScrollExtent - position.pixels < threshold) {
       _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 100),
+        position.maxScrollExtent,
+        duration: const Duration(milliseconds: 300),
         curve: Curves.easeOut,
       );
     }
@@ -358,7 +366,12 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
           style: const TextStyle(color: Colors.white),
         ),
       ),
-      backgroundColor: _isNightTime ? Colors.black87 : null,
+      backgroundColor:
+          _isGameOver
+              ? Colors.grey.shade600
+              : _isNightTime
+              ? Colors.black87
+              : null,
       body: Column(
         children: [
           // タイマー表示
@@ -1084,6 +1097,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   void _startLocalDisplayTimer() {
     _timer?.cancel();
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) async {
+      if (_isGameOver) {
+        _timer?.cancel();
+        return;
+      }
       if (_timerBaseTime != null && _timerBaseRemaining != null) {
         final now = DateTime.now();
         final elapsed = now.difference(_timerBaseTime!).inSeconds;
