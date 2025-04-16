@@ -297,6 +297,15 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
           'votes': {}, // 投票をリセット
         });
 
+        // 投票詳細メッセージを作成
+        final voteDetails = votes.entries
+            .map((entry) {
+              final voterName = players[entry.key]?['displayName'] ?? '不明';
+              final targetName = players[entry.value]?['displayName'] ?? '不明';
+              return '$voterName -> $targetName';
+            })
+            .join('\n');
+
         // システムメッセージを送信
         await _firestore
             .collection('rooms')
@@ -304,7 +313,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
             .collection('messages')
             .add({
               'type': 'system',
-              'text': '⚠️ ${executedPlayerName}が処刑されました。',
+              'text':
+                  '⚠️ ${executedPlayerName}が処刑されました。\n\n投票結果:\n$voteDetails',
               'timestamp': FieldValue.serverTimestamp(),
             });
 
