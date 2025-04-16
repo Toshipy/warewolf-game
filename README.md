@@ -30,3 +30,7 @@ lib/
 └── utils/           // ユーティリティ関数
     └── ...
 ```
+
+```
+flutter devices
+```
